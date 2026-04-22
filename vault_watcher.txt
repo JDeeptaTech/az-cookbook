@@ -1,0 +1,170 @@
+"""
+Vault secret watcher.
+
+Vault Agent writes secrets to /vault/secrets/*.
+This module watches those files and hot-reloads them when the Agent
+rewrites them on renewal — no pod restart, no Vault SDK in the app.
+
+Cross-worker strategy:
+  Each Gunicorn worker runs its own watcher task.
+  All workers read the SAME files (shared tmpfs volume) so they all
+  pick up the same updated values. No DB coordination needed here —
+  the file is the shared store.
+
+Usage:
+    # In your service code — always call get_secret(), never cache directly
+    db_creds   = get_secret("db-creds")
+    api_tokens = get_secret("api-tokens")
+    aap_creds  = get_secret("aap-creds")
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import stat
+from pathlib import Path
+from typing import Any
+
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+# ── Configuration ──────────────────────────────────────────────────────────────
+
+SECRETS_DIR     = Path(os.getenv("VAULT_SECRETS_PATH", "/vault/secrets"))
+POLL_INTERVAL   = 60          # seconds between file stat checks
+_CHECK_ON_READ  = True        # re-check mtime on every get_secret() call
+
+
+# ── In-memory store (per worker) ──────────────────────────────────────────────
+
+class _SecretStore:
+    """
+    Holds the parsed content of each secret file plus the mtime
+    we last loaded it at. Thread-safe for reads; asyncio-safe for writes.
+    """
+    def __init__(self):
+        self._secrets: dict[str, dict[str, Any]] = {}
+        self._mtimes:  dict[str, float]           = {}
+        self._lock = asyncio.Lock()
+
+    def get(self, name: str) -> dict[str, Any]:
+        return self._secrets.get(name, {})
+
+    async def reload_if_changed(self, name: str) -> bool:
+        path = SECRETS_DIR / name
+        if not path.exists():
+            return False
+
+        mtime = path.stat().st_mtime
+        if self._mtimes.get(name) == mtime:
+            return False          # file unchanged
+
+        async with self._lock:
+            # Re-check inside lock
+            mtime = path.stat().st_mtime
+            if self._mtimes.get(name) == mtime:
+                return False
+
+            try:
+                content = path.read_text(encoding="utf-8")
+                parsed  = json.loads(content)
+                self._secrets[name] = parsed
+                self._mtimes[name]  = mtime
+                logger.info("vault_secret_reloaded", secret=name, mtime=mtime)
+                return True
+            except json.JSONDecodeError as e:
+                # Vault Agent may be mid-write — skip this cycle
+                logger.warning("vault_secret_parse_error", secret=name, error=str(e))
+                return False
+
+    async def load_all(self) -> None:
+        """Initial load of all files in SECRETS_DIR."""
+        if not SECRETS_DIR.exists():
+            logger.warning("vault_secrets_dir_missing", path=str(SECRETS_DIR))
+            return
+        for path in SECRETS_DIR.iterdir():
+            if path.is_file() and not path.name.startswith("."):
+                await self.reload_if_changed(path.name)
+        logger.info("vault_secrets_loaded", count=len(self._secrets))
+
+
+_store = _SecretStore()
+
+
+# ── Public interface ───────────────────────────────────────────────────────────
+
+def get_secret(name: str) -> dict[str, Any]:
+    """
+    Return the current in-memory secret dict for `name`.
+
+    If _CHECK_ON_READ is True, the mtime is rechecked on every call
+    so any worker picks up a change within the same event loop tick.
+    Synchronous — safe to call anywhere.
+    """
+    if _CHECK_ON_READ:
+        path = SECRETS_DIR / name
+        if path.exists():
+            mtime = path.stat().st_mtime
+            if _store._mtimes.get(name) != mtime:
+                # Schedule a reload — next async tick will pick it up.
+                # For the current call return the cached value (still valid
+                # until Agent finishes writing the new file).
+                asyncio.get_event_loop().call_soon_threadsafe(
+                    lambda: asyncio.ensure_future(_store.reload_if_changed(name))
+                )
+    return _store.get(name)
+
+
+def get_secret_value(name: str, key: str, default: str = "") -> str:
+    """Convenience helper — get a single key from a secret file."""
+    return get_secret(name).get(key, default)
+
+
+# ── Background watcher task ────────────────────────────────────────────────────
+
+async def _watcher_loop() -> None:
+    """
+    Poll secret files every POLL_INTERVAL seconds.
+    Each worker runs this independently — all read the same tmpfs files.
+    """
+    logger.info("vault_watcher_started", poll_interval=POLL_INTERVAL)
+
+    # Initial load
+    await _store.load_all()
+
+    while True:
+        try:
+            await asyncio.sleep(POLL_INTERVAL)
+
+            if not SECRETS_DIR.exists():
+                logger.warning("vault_secrets_dir_missing")
+                continue
+
+            for path in SECRETS_DIR.iterdir():
+                if path.is_file() and not path.name.startswith("."):
+                    changed = await _store.reload_if_changed(path.name)
+                    if changed:
+                        logger.info("vault_secret_updated", secret=path.name)
+
+        except asyncio.CancelledError:
+            logger.info("vault_watcher_stopped")
+            break
+        except Exception as e:
+            logger.error("vault_watcher_error", error=str(e))
+
+
+async def start_watcher() -> asyncio.Task:
+    """Start the background watcher. Call from FastAPI lifespan."""
+    await _store.load_all()          # pre-load before accepting requests
+    return asyncio.create_task(_watcher_loop(), name="vault-secret-watcher")
+
+
+async def stop_watcher(task: asyncio.Task) -> None:
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
