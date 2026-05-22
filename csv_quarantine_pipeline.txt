@@ -1,0 +1,278 @@
+"""
+dlt CSV ingestion with per-file (and per-row) quarantine.
+
+Design
+------
+A single transformer owns the read so the *validation outcome decides the
+destination table*:
+
+    good rows         -> "sales"
+    rejected files    -> "quarantine_files"   (filename / header / encoding / empty)
+    rejected rows     -> "quarantine_rows"    (Pydantic value/type failures)
+
+Because routing is per item via dlt.mark.with_table_name, a single bad file or
+row never aborts pipeline.run(). You inspect the quarantine tables afterwards,
+fix upstream, and re-run (idempotently, via merge keys).
+
+We deliberately do NOT use the built-in read_csv() transformer here: it would
+load every file unconditionally and force quarantine to be a separate, awkward
+side-channel. Owning the parse is what makes per-file routing clean.
+"""
+
+from __future__ import annotations
+
+import csv
+import io
+import re
+from datetime import datetime, date
+from typing import Iterator
+
+import dlt
+from dlt.sources.filesystem import filesystem, FileItemDict
+from pydantic import BaseModel, field_validator, ValidationError
+
+# --------------------------------------------------------------------------- #
+# Contract definitions
+# --------------------------------------------------------------------------- #
+
+# Filename contract: sales_<2-letter region>_<YYYYMMDD>.csv
+FILENAME_RE = re.compile(r"^sales_(?P<region>[a-z]{2})_(?P<file_date>\d{8})\.csv$")
+
+# Canonical column set, lowercase/snake_case to match dlt's own normalization.
+EXPECTED_COLUMNS = {"id", "region", "amount", "currency", "ts"}
+
+
+class SalesRow(BaseModel):
+    """Row-level value contract. Pydantic v2."""
+    id: int
+    region: str
+    amount: float
+    currency: str
+    ts: date
+
+    @field_validator("region")
+    @classmethod
+    def region_two_letter(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not re.fullmatch(r"[a-z]{2}", v):
+            raise ValueError(f"region must be 2 letters, got {v!r}")
+        return v
+
+    @field_validator("currency")
+    @classmethod
+    def currency_iso(cls, v: str) -> str:
+        v = v.strip().upper()
+        if not re.fullmatch(r"[A-Z]{3}", v):
+            raise ValueError(f"currency must be ISO-4217 3-letter, got {v!r}")
+        return v
+
+    @field_validator("amount")
+    @classmethod
+    def amount_non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError(f"amount must be >= 0, got {v}")
+        return v
+
+
+# --------------------------------------------------------------------------- #
+# Header helpers
+# --------------------------------------------------------------------------- #
+
+def _normalize(name: str) -> str:
+    # strip BOM + surrounding whitespace, lowercase to agree with dlt naming.
+    return name.strip().lstrip("\ufeff").lower()
+
+
+def _check_header(raw_header: list[str] | None) -> tuple[bool, str]:
+    """Returns (ok, reason_detail). reason_detail is '' when ok."""
+    if not raw_header:
+        return False, "empty file or missing header"
+    norm = [_normalize(c) for c in raw_header]
+    dupes = {c for c in norm if norm.count(c) > 1}
+    if dupes:
+        return False, f"duplicate columns: {sorted(dupes)}"
+    header = set(norm)
+    missing = EXPECTED_COLUMNS - header
+    extra = header - EXPECTED_COLUMNS
+    if missing or extra:
+        return False, f"schema mismatch missing={sorted(missing)} extra={sorted(extra)}"
+    return True, ""
+
+
+def _quarantine_file(f: FileItemDict, reason: str, detail: str) -> dict:
+    return {
+        "file_name": f["file_name"],
+        "relative_path": f.get("relative_path"),
+        "modification_date": f.get("modification_date"),
+        "reason": reason,          # filename | encoding | empty | schema | read_error
+        "detail": detail,
+        "quarantined_at": datetime.utcnow(),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# The quarantining transformer
+# --------------------------------------------------------------------------- #
+
+@dlt.transformer(
+    # default name; every yield overrides it via with_table_name, but the
+    # resource still needs a name for state/lineage.
+    name="sales",
+    write_disposition="merge",
+    primary_key="id",
+)
+def ingest_with_quarantine(files: Iterator[FileItemDict]) -> Iterator:
+    for f in files:
+        name = f["file_name"]
+
+        # --- Layer 1: filename contract -------------------------------------
+        m = FILENAME_RE.match(name)
+        if not m:
+            yield dlt.mark.with_table_name(
+                _quarantine_file(f, "filename", "does not match sales_<rr>_<YYYYMMDD>.csv"),
+                "quarantine_files",
+            )
+            continue
+        file_region = m.group("region")
+        file_date = m.group("file_date")
+
+        # --- open + decode (binary -> text wrapper is filesystem-agnostic) --
+        try:
+            raw = f.open(mode="rb")
+        except Exception as e:  # noqa: BLE001 - any fsspec/IO failure -> quarantine
+            yield dlt.mark.with_table_name(
+                _quarantine_file(f, "read_error", repr(e)), "quarantine_files"
+            )
+            continue
+
+        try:
+            text = io.TextIOWrapper(raw, encoding="utf-8-sig", newline="")
+            reader = csv.DictReader(text)
+
+            # --- Layer 2: header contract -----------------------------------
+            try:
+                ok, detail = _check_header(reader.fieldnames)
+            except UnicodeDecodeError as e:
+                yield dlt.mark.with_table_name(
+                    _quarantine_file(f, "encoding", repr(e)), "quarantine_files"
+                )
+                continue
+            if not ok:
+                yield dlt.mark.with_table_name(
+                    _quarantine_file(f, "empty" if "empty" in detail else "schema", detail),
+                    "quarantine_files",
+                )
+                continue
+
+            # map raw header -> normalized keys once
+            rename = {orig: _normalize(orig) for orig in reader.fieldnames}
+
+            # --- Layer 3: per-row value contract ----------------------------
+            for line_no, raw_row in enumerate(reader, start=2):  # row 1 = header
+                row = {rename[k]: v for k, v in raw_row.items()}
+                try:
+                    valid = SalesRow.model_validate(row)
+                except ValidationError as e:
+                    yield dlt.mark.with_table_name(
+                        {
+                            "file_name": name,
+                            "line_no": line_no,
+                            "raw_row": row,            # loads as JSON/struct
+                            "error": e.errors(include_url=False),
+                            "quarantined_at": datetime.utcnow(),
+                        },
+                        "quarantine_rows",
+                    )
+                    continue
+
+                out = valid.model_dump()
+                out["ts"] = out["ts"].isoformat()
+                # cross-check: filename region vs row region (cheap integrity guard)
+                if out["region"] != file_region:
+                    yield dlt.mark.with_table_name(
+                        {
+                            "file_name": name,
+                            "line_no": line_no,
+                            "raw_row": row,
+                            "error": f"row region {out['region']!r} != filename region {file_region!r}",
+                            "quarantined_at": datetime.utcnow(),
+                        },
+                        "quarantine_rows",
+                    )
+                    continue
+
+                out["_file_name"] = name
+                out["_file_date"] = file_date
+                yield dlt.mark.with_table_name(out, "sales")
+        finally:
+            raw.close()
+
+
+# --------------------------------------------------------------------------- #
+# Pipeline
+# --------------------------------------------------------------------------- #
+
+def run(bucket_url: str) -> None:
+    # incremental=modification_date means re-runs only re-read changed files.
+    files = filesystem(
+        bucket_url=bucket_url,
+        file_glob="sales_*.csv",
+        incremental=dlt.sources.incremental("modification_date"),
+    )
+    source = (files | ingest_with_quarantine)
+
+    pipeline = dlt.pipeline(
+        pipeline_name="sales_ingest",
+        destination="duckdb",
+        dataset_name="sales_raw",
+    )
+    info = pipeline.run(source)
+    print(info)
+
+    # ---- post-run observability: alert on quarantine -----------------------
+    with pipeline.sql_client() as c:
+        for tbl in ("quarantine_files", "quarantine_rows"):
+            try:
+                n = c.execute_sql(f"SELECT count(*) FROM {tbl}")[0][0]
+            except Exception:
+                n = 0  # table not created => nothing quarantined
+            if n:
+                print(f"WARNING: {n} entries in {tbl} -- inspect before trusting load")
+
+
+# --------------------------------------------------------------------------- #
+# Self-contained fixtures so the sample runs out of the box.
+# Delete this block when wiring to your real bucket.
+# --------------------------------------------------------------------------- #
+
+def _write_fixtures(d: str) -> None:
+    import os
+    os.makedirs(d, exist_ok=True)
+    # 1. clean file
+    with open(os.path.join(d, "sales_gb_20260101.csv"), "w") as fh:
+        fh.write("id,region,amount,currency,ts\n")
+        fh.write("1,gb,100.50,GBP,2026-01-01\n")
+        fh.write("2,gb,9.99,GBP,2026-01-01\n")
+    # 2. good header, one bad row (negative amount) + one wrong-region row
+    with open(os.path.join(d, "sales_us_20260102.csv"), "w") as fh:
+        fh.write("id,region,amount,currency,ts\n")
+        fh.write("3,us,42.00,USD,2026-01-02\n")
+        fh.write("4,us,-5.00,USD,2026-01-02\n")     # -> quarantine_rows (amount)
+        fh.write("5,gb,1.00,USD,2026-01-02\n")       # -> quarantine_rows (region mismatch)
+    # 3. bad header (missing 'currency')  -> quarantine_files (schema)
+    with open(os.path.join(d, "sales_fr_20260103.csv"), "w") as fh:
+        fh.write("id,region,amount,ts\n")
+        fh.write("6,fr,7.00,2026-01-03\n")
+    # 4. bad filename                       -> quarantine_files (filename)
+    with open(os.path.join(d, "sales_backup.csv"), "w") as fh:
+        fh.write("id,region,amount,currency,ts\n")
+        fh.write("7,fr,7.00,EUR,2026-01-03\n")
+
+
+if __name__ == "__main__":
+    import tempfile
+
+    tmp = tempfile.mkdtemp(prefix="dlt_csv_sample_")
+    _write_fixtures(tmp)
+    print(f"fixtures in {tmp}")
+    run(bucket_url=f"file://{tmp}")
