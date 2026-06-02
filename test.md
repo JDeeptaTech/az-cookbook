@@ -1,4 +1,27 @@
+```txt
+Hi Igor,
+
+Thanks for the RCA — the ensureMCSCert / BMAC connectivity-window explanation matches what we're seeing (node healthy and serving pods, but no spoke-side Machine/BMH).
+
+Apologies for the attachment mix-up. You were right: the original zip was the gboclu301 hub must-gather. I've attached a fresh bundle gathered against the spoke (gboclu316) — I gated the collection on infrastructureName so it can't repeat the swap, and the must-gather includes an infra-name check file confirming gboclu316.
+
+The bundle covers your asks:
+  1. Spoke must-gather (verified gboclu316).
+  2. Spoke Machine/Node/BMH state — Machine and BMH for gbo25238044 are both absent, node is Ready (confirms the gap).
+  3. Hub Agent f5ba57ab-…d3f and BMH gbo25238044 (-n gboclu316), full YAML + flattened conditions.
+  4. Hub→spoke healthz from inside the assisted-service pod — by hostname and by IP, plus a raw TCP check and DNS resolution (results in connectivity/).
+  5. On the network event: I'm chasing the May 18 20:00–19 01:52 UTC window with the network team. The i/o timeout (no SYN-ACK, vs refused/TLS error) points at the L3/L4 path — firewall or the API VIP — rather than the spoke control plane, so that's where we're looking.
+
+One question before we remediate: given the node is healthy and the only deficit is the Machine-API representation, is there any supported way to get BMAC to recreate the spoke Machine/BMH without a full reprovision — e.g. re-driving the reconcile now that connectivity is restored? If not, we'll proceed with your option 1 (drain → delete hub Agent+BMH → let GitOps recreate and reprovision). If you can confirm the exact delete sequence for our MCE version, I'll schedule the drain.
+
+```
+
+
 ``` bash
+
+
+
+
 TOKEN=$(oc whoami -t)
 API=$(oc whoami --show-server)
 
