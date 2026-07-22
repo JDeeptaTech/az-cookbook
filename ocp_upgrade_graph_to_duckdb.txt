@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""
+Load OpenShift update-graph (Cincinnati) channels into DuckDB and compare
+against the current cluster version and releases mirrored in Nexus.
+
+Data sources
+  1. Channel names:   https://api.openshift.com/api/upgrades_info/graph-data (tarball)
+  2. Graph per chan:  https://api.openshift.com/api/upgrades_info/v1/graph?channel=X&arch=amd64
+  3. Cluster version: {OC_API}/apis/config.openshift.io/v1/clusterversions/version
+  4. Nexus tags:      {NEXUS_URL}/v2/{NEXUS_IMAGE}/tags/list   (docker registry API)
+
+Env (all optional except when the corresponding step runs):
+  OC_API, OC_TOKEN, OC_CA_CERT      -> cluster version snapshot
+  NEXUS_URL, NEXUS_IMAGE            -> e.g. https://nexus.corp:8443, ocp4/openshift-release-dev/ocp-release
+  NEXUS_USER, NEXUS_PASS            -> basic auth if required
+
+Usage:
+  python ocp_upgrade_graph_to_duckdb.py --db ocp.duckdb --channels stable-4.18 fast-4.19
+  python ocp_upgrade_graph_to_duckdb.py --db ocp.duckdb --all-channels --arch amd64
+  python ocp_upgrade_graph_to_duckdb.py --db ocp.duckdb --path-from 4.16.30 --channel stable-4.18
+"""
+
+import argparse
+import io
+import os
+import sys
+import tarfile
+from datetime import datetime, timezone
+
+import duckdb
+import requests
+import yaml
+
+OSUS = "https://api.openshift.com/api/upgrades_info"
+TIMEOUT = 60
+
+
+# ---------------------------------------------------------------- ingest ----
+
+def fetch_channel_index() -> dict[str, list[str]]:
+    """channel name -> list of member versions, from the graph-data tarball."""
+    r = requests.get(f"{OSUS}/graph-data", timeout=TIMEOUT)
+    r.raise_for_status()
+    channels: dict[str, list[str]] = {}
+    with tarfile.open(fileobj=io.BytesIO(r.content), mode="r:*") as tar:
+        for m in tar.getmembers():
+            if m.name.startswith("channels/") and m.name.endswith(".yaml"):
+                doc = yaml.safe_load(tar.extractfile(m).read())
+                channels[doc["name"]] = doc.get("versions", [])
+    return channels
+
+
+def fetch_graph(channel: str, arch: str) -> tuple[list, list]:
+    """Resolved nodes and edges for one channel from the Cincinnati API."""
+    r = requests.get(
+        f"{OSUS}/v1/graph",
+        params={"channel": channel, "arch": arch},
+        headers={"Accept": "application/json"},
+        timeout=TIMEOUT,
+    )
+    r.raise_for_status()
+    g = r.json()
+    nodes = g.get("nodes", [])
+    # edges are index pairs into nodes
+    edges = [(nodes[a]["version"], nodes[b]["version"]) for a, b in g.get("edges", [])]
+    return nodes, edges
+
+
+def fetch_cluster_version() -> tuple[str, str] | None:
+    api, token = os.environ.get("OC_API"), os.environ.get("OC_TOKEN")
+    if not (api and token):
+        return None
+    r = requests.get(
+        f"{api.rstrip('/')}/apis/config.openshift.io/v1/clusterversions/version",
+        headers={"Authorization": f"Bearer {token}"},
+        verify=os.environ.get("OC_CA_CERT", True),
+        timeout=TIMEOUT,
+    )
+    r.raise_for_status()
+    cv = r.json()
+    return cv["status"]["desired"]["version"], cv["spec"].get("channel", "")
+
+
+def fetch_nexus_tags() -> list[str]:
+    base, image = os.environ.get("NEXUS_URL"), os.environ.get("NEXUS_IMAGE")
+    if not (base and image):
+        return []
+    auth = None
+    if os.environ.get("NEXUS_USER"):
+        auth = (os.environ["NEXUS_USER"], os.environ.get("NEXUS_PASS", ""))
+    tags, last = [], None
+    while True:
+        params = {"n": 500, **({"last": last} if last else {})}
+        r = requests.get(f"{base.rstrip('/')}/v2/{image}/tags/list",
+                         params=params, auth=auth, timeout=TIMEOUT)
+        r.raise_for_status()
+        batch = r.json().get("tags") or []
+        tags.extend(batch)
+        if len(batch) < 500:
+            return tags
+        last = batch[-1]
+
+
+# ---------------------------------------------------------------- schema ----
+
+def init_schema(con):
+    con.execute("""
+      CREATE TABLE IF NOT EXISTS channels (
+        snapshot_ts TIMESTAMPTZ, channel VARCHAR, version VARCHAR);
+      CREATE TABLE IF NOT EXISTS graph_nodes (
+        snapshot_ts TIMESTAMPTZ, channel VARCHAR, arch VARCHAR,
+        version VARCHAR, payload VARCHAR);
+      CREATE TABLE IF NOT EXISTS graph_edges (
+        snapshot_ts TIMESTAMPTZ, channel VARCHAR, arch VARCHAR,
+        from_version VARCHAR, to_version VARCHAR);
+      CREATE TABLE IF NOT EXISTS cluster_state (
+        snapshot_ts TIMESTAMPTZ, version VARCHAR, channel VARCHAR);
+      CREATE TABLE IF NOT EXISTS nexus_releases (
+        snapshot_ts TIMESTAMPTZ, image VARCHAR, tag VARCHAR);
+    """)
+
+
+# ----------------------------------------------------------------- query ----
+
+PATH_SQL = """
+WITH RECURSIVE latest AS (
+  SELECT max(snapshot_ts) ts FROM graph_edges WHERE channel = ?
+),
+edges AS (
+  SELECT from_version, to_version FROM graph_edges, latest
+  WHERE channel = ? AND snapshot_ts = latest.ts
+  {nexus_filter}
+),
+walk(version, path, hops) AS (
+  SELECT ?, [?], 0
+  UNION ALL
+  SELECT e.to_version, list_append(w.path, e.to_version), w.hops + 1
+  FROM walk w JOIN edges e ON e.from_version = w.version
+  WHERE NOT list_contains(w.path, e.to_version) AND w.hops < 12
+)
+SELECT version AS reachable, hops, path
+FROM walk
+QUALIFY row_number() OVER (PARTITION BY version ORDER BY hops) = 1
+ORDER BY string_split(version, '.')[1]::INT,
+         string_split(version, '.')[2]::INT,
+         string_split(version, '.')[3]::INT
+"""
+
+NEXUS_FILTER = """
+  AND to_version IN (
+    SELECT tag FROM nexus_releases
+    WHERE snapshot_ts = (SELECT max(snapshot_ts) FROM nexus_releases))
+"""
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--db", default="ocp.duckdb")
+    ap.add_argument("--arch", default="amd64")
+    ap.add_argument("--channels", nargs="*", default=[])
+    ap.add_argument("--all-channels", action="store_true")
+    ap.add_argument("--skip-ingest", action="store_true")
+    ap.add_argument("--path-from", help="compute upgrade paths from this version")
+    ap.add_argument("--channel", help="channel for --path-from")
+    ap.add_argument("--only-in-nexus", action="store_true",
+                    help="restrict paths to releases mirrored in Nexus")
+    args = ap.parse_args()
+
+    con = duckdb.connect(args.db)
+    init_schema(con)
+    ts = datetime.now(timezone.utc)
+
+    if not args.skip_ingest:
+        index = fetch_channel_index()
+        wanted = list(index) if args.all_channels else args.channels
+        unknown = set(wanted) - set(index)
+        if unknown:
+            sys.exit(f"Unknown channels: {sorted(unknown)}")
+
+        con.begin()
+        con.executemany("INSERT INTO channels VALUES (?,?,?)",
+                        [(ts, c, v) for c, vs in index.items() for v in vs])
+        for ch in wanted:
+            nodes, edges = fetch_graph(ch, args.arch)
+            con.executemany("INSERT INTO graph_nodes VALUES (?,?,?,?,?)",
+                            [(ts, ch, args.arch, n["version"], n.get("payload")) for n in nodes])
+            con.executemany("INSERT INTO graph_edges VALUES (?,?,?,?,?)",
+                            [(ts, ch, args.arch, a, b) for a, b in edges])
+            print(f"{ch}: {len(nodes)} nodes, {len(edges)} edges")
+
+        cv = fetch_cluster_version()
+        if cv:
+            con.execute("INSERT INTO cluster_state VALUES (?,?,?)", (ts, *cv))
+            print(f"cluster: {cv[0]} on channel {cv[1]}")
+
+        tags = fetch_nexus_tags()
+        if tags:
+            image = os.environ["NEXUS_IMAGE"]
+            con.executemany("INSERT INTO nexus_releases VALUES (?,?,?)",
+                            [(ts, image, t) for t in tags])
+            print(f"nexus: {len(tags)} tags in {image}")
+        con.commit()
+
+    if args.path_from:
+        if not args.channel:
+            sys.exit("--path-from requires --channel")
+        sql = PATH_SQL.format(nexus_filter=NEXUS_FILTER if args.only_in_nexus else "")
+        rows = con.execute(sql, [args.channel, args.channel,
+                                 args.path_from, args.path_from]).fetchall()
+        if not rows:
+            print(f"No outgoing edges from {args.path_from} in {args.channel} "
+                  "(version not in channel, or dead-end).")
+        for version, hops, path in rows:
+            print(f"{version:>12}  hops={hops}  {' -> '.join(path)}")
+
+    con.close()
+
+
+if __name__ == "__main__":
+    main()
