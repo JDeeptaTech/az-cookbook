@@ -1,0 +1,39 @@
+flowchart TB
+    subgraph REQ["1 · Request"]
+        U[User / Requester] -->|"channel + version range<br/>(+ operators, arch)"| FORM["Request intake<br/>(ServiceNow / Jira / Git PR<br/>with request.yaml)"]
+    end
+
+    subgraph PLAN["2 · Plan (Skyline)"]
+        FORM --> VAL["Validate & compute delta"]
+        SKY[("Skyline data<br/>parquet / Postgres<br/>graph nodes+edges,<br/>Nexus inventory")] --> VAL
+        VAL -->|"already mirrored → reject/no-op"| U
+        VAL -->|"delta list:<br/>versions actually missing"| AAP
+    end
+
+    subgraph AUTO["3 · Execute (Ansible)"]
+        AAP["Ansible (AAP / awx / cli)<br/>playbook: mirror-channel"] -->|"render ImageSetConfiguration<br/>from template + request"| ISC["isc-&lt;request-id&gt;.yaml"]
+        AAP -->|"acquire lock<br/>(one run at a time)"| LOCK["flock on mirror server"]
+    end
+
+    subgraph MSRV["4 · Mirror server (existing, single node)"]
+        ISC --> OCM["oc-mirror v2<br/>m2m: --workspace persistent"]
+        WS[("persistent workspace<br/>history/ metadata<br/>= incremental runs")] <--> OCM
+        RH["Upstream registries<br/>quay.io / registry.redhat.io"] -->|pull| OCM
+    end
+
+    subgraph TARGET["5 · Targets"]
+        OCM -->|push| NEX[("Nexus<br/>mirror registry")]
+        OCM -->|"IDMS / ITMS /<br/>CatalogSource / UpdateService"| GIT["Git (cluster-config repo)"]
+        GIT -->|GitOps / ArgoCD| OCP["OpenShift clusters"]
+    end
+
+    subgraph POST["6 · Close the loop"]
+        NEX --> SNAP["Skyline ingest<br/>(next scheduled run)"]
+        SNAP --> SKY
+        AAP -->|"result + summary"| U
+    end
+
+    style SKY fill:#1f6feb,color:#fff
+    style OCM fill:#ee0000,color:#fff
+    style NEX fill:#2da44e,color:#fff
+    style WS fill:#8250df,color:#fff
