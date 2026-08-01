@@ -1,0 +1,98 @@
+<mxfile host="app.diagrams.net" version="24.7.7">
+  <diagram id="skyline-mirror" name="Mirror request flow">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1240" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ===== background containers ===== -->
+        <mxCell id="c_sched" value="🕐  SCHEDULED — AAP schedule, every 6h" style="rounded=1;html=1;dashed=1;dashPattern=6 4;fillColor=#FFF4E6;strokeColor=#E8590C;fontColor=#4A2500;fontStyle=1;verticalAlign=top;align=left;spacingLeft=12;spacingTop=6;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="360" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="c_wf" value="🚀  USER-INVOKED — AAP workflow: mirror-request" style="rounded=1;html=1;dashed=1;dashPattern=6 4;fillColor=#F4F9FF;strokeColor=#1971C2;fontColor=#0B3D66;fontStyle=1;verticalAlign=top;align=left;spacingLeft=12;spacingTop=6;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="460" y="40" width="460" height="400" as="geometry" />
+        </mxCell>
+        <mxCell id="c_msrv" value="🖥️  MIRROR SERVER — existing single node" style="rounded=1;html=1;dashed=1;dashPattern=6 4;fillColor=#FFF5F5;strokeColor=#C92A2A;fontColor=#5C1010;fontStyle=1;verticalAlign=top;align=left;spacingLeft=12;spacingTop=6;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="460" y="560" width="460" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- ===== scheduled lane ===== -->
+        <mxCell id="n_ingest" value="⚙️ &lt;b&gt;Job template: skyline-ingest&lt;/b&gt;&lt;br/&gt;concurrency = 1" style="rounded=1;html=1;fillColor=#FFE8CC;strokeColor=#E8590C;fontColor=#4A2500;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="70" y="80" width="300" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="n_sources" value="☁️ Cincinnati graph&#160;&#160;·&#160;&#160;🎛️ Cluster version&#160;&#160;·&#160;&#160;📦 Nexus inventory" style="rounded=1;html=1;fillColor=#FFF9F2;strokeColor=#E8590C;fontColor=#4A2500;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="70" y="170" width="300" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===== stores / ui / upstream (left column) ===== -->
+        <mxCell id="n_sky" value="🗄️ &lt;b&gt;Skyline store&lt;/b&gt;&lt;br/&gt;parquet + Postgres" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#1971C2;strokeColor=#0B4A8A;fontColor=#FFFFFF;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="120" y="340" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="n_stream" value="📊 &lt;b&gt;Streamlit dashboard&lt;/b&gt;&lt;br/&gt;UI only — reads Skyline" style="rounded=1;html=1;fillColor=#E6FCF5;strokeColor=#0CA678;fontColor=#04543F;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="90" y="490" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="n_up" value="🌐 &lt;b&gt;Upstream registries&lt;/b&gt;&lt;br/&gt;quay.io · registry.redhat.io" style="rounded=1;html=1;fillColor=#F3F0FF;strokeColor=#7048E8;fontColor=#3B2A80;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="70" y="600" width="300" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===== workflow lane ===== -->
+        <mxCell id="n_user" value="👤 &lt;b&gt;Requester&lt;/b&gt; — survey: channel, target version, arch, operators" style="rounded=1;html=1;fillColor=#E7F5FF;strokeColor=#1971C2;fontColor=#0B3D66;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="500" y="80" width="380" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="n_plan" value="🧮 &lt;b&gt;Node 1 · plan&lt;/b&gt; — compute delta vs Nexus (DuckDB over Skyline)" style="rounded=1;html=1;fillColor=#E7F5FF;strokeColor=#1971C2;fontColor=#0B3D66;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="500" y="160" width="380" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="n_appr" value="✋ &lt;b&gt;Node 2 · approval&lt;/b&gt;&lt;br/&gt;reviewer sees plan_delta" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fillColor=#FFF9DB;strokeColor=#F08C00;strokeWidth=2;fontColor=#5C4400;fontStyle=1;size=0.12;" vertex="1" parent="1">
+          <mxGeometry x="500" y="240" width="380" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="n_exec" value="⚡ &lt;b&gt;Node 3 · execute&lt;/b&gt;&lt;br/&gt;concurrency = 1" style="rounded=1;html=1;fillColor=#EBFBEE;strokeColor=#2F9E44;fontColor=#0B4419;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="500" y="350" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="n_notify" value="📣 Notify&lt;br/&gt;requester" style="rounded=1;html=1;fillColor=#E7F5FF;strokeColor=#1971C2;fontColor=#0B3D66;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="760" y="350" width="120" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===== mirror server lane ===== -->
+        <mxCell id="n_lock" value="🔒 flock +&lt;br/&gt;persistent workspace" style="rounded=1;html=1;fillColor=#C92A2A;strokeColor=#8A1A1A;fontColor=#FFFFFF;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="500" y="605" width="180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="n_ocm" value="🪞 &lt;b&gt;oc-mirror v2&lt;/b&gt;&lt;br/&gt;m2m · shortestPath" style="rounded=1;html=1;fillColor=#C92A2A;strokeColor=#8A1A1A;fontColor=#FFFFFF;fontStyle=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="710" y="605" width="180" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ===== right column: targets ===== -->
+        <mxCell id="n_nexus" value="📦 &lt;b&gt;Nexus&lt;/b&gt;&lt;br/&gt;mirror registry" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#2F9E44;strokeColor=#1B5E2A;fontColor=#FFFFFF;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="990" y="560" width="190" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="n_git" value="📁 &lt;b&gt;Git&lt;/b&gt; — IDMS / ITMS / CatalogSource" style="rounded=1;html=1;fillColor=#F8F9FA;strokeColor=#495057;fontColor=#212529;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="990" y="700" width="190" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="n_ocp" value="☸️ &lt;b&gt;OpenShift clusters&lt;/b&gt;&lt;br/&gt;via GitOps / ArgoCD" style="rounded=1;html=1;fillColor=#F8F9FA;strokeColor=#495057;fontColor=#212529;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="990" y="785" width="190" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===== edges ===== -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;strokeColor=#E8590C;" edge="1" parent="1" source="n_ingest" target="n_sources"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;strokeColor=#E8590C;" edge="1" parent="1" source="n_sources" target="n_sky"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" value="plan reads graph + inventory" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;strokeColor=#1971C2;fontColor=#0B3D66;fontSize=10;" edge="1" parent="1" source="n_sky" target="n_plan"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;strokeColor=#1971C2;" edge="1" parent="1" source="n_user" target="n_plan"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" value="set_stats: plan_delta" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;strokeColor=#1971C2;fontColor=#0B3D66;fontSize=10;" edge="1" parent="1" source="n_plan" target="n_appr"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" value="✅ approved" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;strokeColor=#2F9E44;fontColor=#0B4419;fontStyle=1;fontSize=10;" edge="1" parent="1" source="n_appr" target="n_exec"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" value="❌ denied / no-op" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;strokeColor=#C92A2A;fontColor=#5C1010;fontSize=10;" edge="1" parent="1" source="n_appr" target="n_notify"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;strokeColor=#1971C2;" edge="1" parent="1" source="n_exec" target="n_notify"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" value="delegate_to" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;strokeColor=#2F9E44;fontColor=#0B4419;fontSize=10;" edge="1" parent="1" source="n_exec" target="n_ocm"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e10" value="pull" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;strokeColor=#7048E8;fontColor=#3B2A80;fontSize=10;" edge="1" parent="1" source="n_up" target="n_ocm"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e11" value="push" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;strokeColor=#2F9E44;fontColor=#0B4419;fontStyle=1;fontSize=10;" edge="1" parent="1" source="n_ocm" target="n_nexus"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;strokeColor=#495057;" edge="1" parent="1" source="n_ocm" target="n_git"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;strokeColor=#495057;" edge="1" parent="1" source="n_git" target="n_ocp"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e14" value="🔄 next scheduled ingest" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;dashed=1;strokeColor=#E8590C;fontColor=#4A2500;fontSize=10;exitX=0;exitY=0.5;" edge="1" parent="1" source="n_nexus" target="n_ingest">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="30" y="660" /><mxPoint x="30" y="110" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=1;strokeColor=#0CA678;" edge="1" parent="1" source="n_sky" target="n_stream"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e16" style="endArrow=none;html=1;strokeColor=#8A1A1A;dashed=1;" edge="1" parent="1" source="n_lock" target="n_ocm"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
