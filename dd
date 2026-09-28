@@ -1,0 +1,114 @@
+``` grrovy
+# Repository & URL construction
+pages_repo="${GITHUB_PAGES_REPO%.git}"
+pages_host="${pages_repo#https://}"
+pages_host="${pages_host%%/*}"
+pages_path="${pages_repo#https://${pages_host}/}"
+
+# Environment base URL and specific build path
+env_report_url="https://${pages_host}/pages/${pages_path}/${IAC_ENVIRONMENT}/"
+report_path="${IAC_ENVIRONMENT}/build-${BUILD_NUMBER}"
+report_url="https://${pages_host}/pages/${pages_path}/${report_path}/index.html"
+
+# Metadata properties & executor configuration for Allure
+mkdir -p allure-results
+printf 'Environment=%s\nVM client version=%s\n' \
+  "${IAC_ENVIRONMENT}" "${vm_client_version}" > allure-results/environment.properties
+
+printf '{"buildOrder":%s,"reportName":"VM tests #%s","reportUrl":"%s"}\n' \
+  "${BUILD_NUMBER}" "${BUILD_NUMBER}" \
+  "${report_url}" > allure-results/executor.json
+
+# Clone the existing GitHub Pages branch
+rm -rf allure-site
+pages_auth_header="Authorization: Basic $(printf '%s' "${GIT_USERNAME}:${GIT_PASSWORD}" | base64 | tr -d '\n')"
+git -c http.extraHeader="${pages_auth_header}" clone \
+  --branch "${GITHUB_PAGES_BRANCH}" \
+  --single-branch "${GITHUB_PAGES_REPO}" allure-site
+
+# -------------------------------------------------------------------------
+# FIX 1: Restore trend history for this specific environment
+# -------------------------------------------------------------------------
+mkdir -p allure-results/history
+if [ -d "allure-site/${IAC_ENVIRONMENT}/history" ]; then
+  cp -r allure-site/${IAC_ENVIRONMENT}/history/* allure-results/history/ 2>/dev/null || true
+fi
+
+# Generate Allure report
+rm -rf allure-generated
+allure generate allure-results --clean -o allure-generated
+
+# -------------------------------------------------------------------------
+# FIX 2: Publish dedicated pages per environment + persist history
+# -------------------------------------------------------------------------
+# 1. Save historical trend files for this environment's next runs
+mkdir -p "allure-site/${IAC_ENVIRONMENT}/history"
+cp -r allure-generated/history/* "allure-site/${IAC_ENVIRONMENT}/history/"
+
+# 2. Update the environment's dedicated landing page (e.g. /cto-pa-hic-vm-osv-tests/iac-poc/)
+mkdir -p "allure-site/${IAC_ENVIRONMENT}"
+cp -r allure-generated/* "allure-site/${IAC_ENVIRONMENT}/"
+
+# 3. Archive this specific build (e.g. /cto-pa-hic-vm-osv-tests/iac-poc/build-28/)
+mkdir -p "allure-site/${report_path}"
+cp -r allure-generated/* "allure-site/${report_path}/"
+
+# -------------------------------------------------------------------------
+# Root Landing Dashboard (index.html) linking to each environment page
+# -------------------------------------------------------------------------
+cat > allure-site/index.html <<'EOF'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VM Test Reports by Environment</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #202124; }
+    h1 { border-bottom: 2px solid #e0e0e0; padding-bottom: 12px; }
+    .env-card { border: 1px solid #dadce0; border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+    .env-card a { font-size: 18px; font-weight: 600; color: #1a73e8; text-decoration: none; }
+    .env-card a:hover { text-decoration: underline; }
+    .btn { background-color: #1a73e8; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h1>VM Test Environments</h1>
+  <div id="env-list">
+EOF
+
+# Dynamically populate links for all environments found in allure-site
+for env_dir in allure-site/*/; do
+  [ -d "${env_dir}" ] || continue
+  env_name="$(basename "${env_dir}")"
+  # Ignore internal or non-environment folders
+  if [ "${env_name}" != "history" ] && [ -f "${env_dir}index.html" ]; then
+    cat >> allure-site/index.html <<EOF
+    <div class="env-card">
+      <span><strong>${env_name}</strong></span>
+      <a class="btn" href="./${env_name}/index.html">Open Latest Report</a>
+    </div>
+EOF
+  fi
+done
+
+cat >> allure-site/index.html <<'EOF'
+  </div>
+</body>
+</html>
+EOF
+
+# -------------------------------------------------------------------------
+# Git commit and push back to GitHub Pages
+# -------------------------------------------------------------------------
+echo "Published Environment Report: ${env_report_url}"
+echo "Published Build Report: ${report_url}"
+
+git -C allure-site config user.name "Jenkins"
+git -C allure-site config user.email "jenkins@localhost"
+git -C allure-site add --all
+git -C allure-site commit -m "Publish Allure report for ${IAC_ENVIRONMENT} build ${BUILD_NUMBER}" || echo "No changes to commit"
+git -C allure-site \
+  -c http.extraHeader="${pages_auth_header}" \
+  push origin "HEAD:${GITHUB_PAGES_BRANCH}"
+```
