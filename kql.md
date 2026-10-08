@@ -1,5 +1,10 @@
 1. Application Insights: AMPLS and public access status
 ``` kql
+vunion withsource=T App*
+| where TimeGenerated > ago(30d) and _IsBillable
+| summarize GB = round(sum(_BilledSize)/1024/1024/1024, 2) by bin(TimeGenerated, 1d), _ResourceId
+| render columnchart
+
 resources
 | where type =~ 'microsoft.insights/components'
 | extend ingestPublic  = tostring(properties.publicNetworkAccessForIngestion),
