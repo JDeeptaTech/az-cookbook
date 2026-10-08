@@ -7,6 +7,12 @@ vunion withsource=T App*
 
 resources
 | where type =~ 'microsoft.insights/components'
+| extend ws = tostring(properties.WorkspaceResourceId)
+| summarize AppInsights = count() by Workspace = iff(isempty(ws), '(classic)', ws)
+| order by AppInsights desc
+
+resources
+| where type =~ 'microsoft.insights/components'
 | extend ingestPublic  = tostring(properties.publicNetworkAccessForIngestion),
          queryPublic   = tostring(properties.publicNetworkAccessForQuery),
          workspaceId   = tolower(tostring(properties.WorkspaceResourceId)),
