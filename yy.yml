@@ -1,0 +1,59 @@
+``` yml
+  config:
+    extensions:
+      file_storage/queue:
+        directory: /var/lib/otelcol/queue     # mount a small PVC here
+    exporters:
+      otlp_http/eosvmaudit:                   # or: otlp/eosvmaudit with :4317 (gRPC)
+        endpoint: https://<central-otlp-gateway>:4318
+        compression: gzip
+        timeout: 30s
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 60s
+          max_elapsed_time: 30m
+        sending_queue:
+          enabled: true
+          storage: file_storage/queue
+          queue_size: 5000
+        tls:
+          ca_file: /etc/pki/ca-trust/source/otel/ca-bundle.crt
+          cert_file: /etc/pki/ca-trust/source/otel/otel.cer
+          key_file: /etc/pki/ca-trust/source/otel/client.key
+          insecure: false
+          reload_interval: 1h                 # insecure_skip_verify removed
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 20
+      transform/strip_managedfields:  { ... unchanged ... }
+      resource/eosvmaudit:            { ... unchanged ... }
+      batch:
+        send_batch_size: 500
+        timeout: 5s
+    receivers:
+      k8s_objects/kubevirt_pull:
+        auth_type: serviceAccount
+        objects:
+          - { group: kubevirt.io, name: virtualmachines, mode: pull, interval: 15m }
+          - { group: kubevirt.io, name: virtualmachineinstances, mode: pull, interval: 15m }
+      k8s_objects/kubevirt_watch:
+        auth_type: serviceAccount
+        objects:
+          - { group: kubevirt.io, name: virtualmachines, mode: watch }
+          - { group: kubevirt.io, name: virtualmachineinstances, mode: watch }
+    service:
+      extensions: [file_storage/queue]
+      pipelines:
+        logs/eosvmaudit:
+          receivers: [k8s_objects/kubevirt_watch, k8s_objects/kubevirt_pull]
+          processors: [memory_limiter, transform/strip_managedfields, resource/eosvmaudit, batch]
+          exporters: [otlp_http/eosvmaudit]
+  observability:
+    metrics:
+      enableMetrics: true                     # ServiceMonitor for :8888
+  # targetAllocator: remove — no prometheus receiver in this collector
+  replicas: 1                                 # keep: k8s_objects has no leader election
+```
