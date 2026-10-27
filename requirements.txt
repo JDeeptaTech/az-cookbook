@@ -1,0 +1,4 @@
+confluent-kafka==2.5.3
+psycopg[binary]==3.2.3
+# only for PAYLOAD_ENCODING=otlp_proto
+opentelemetry-proto==1.27.0
