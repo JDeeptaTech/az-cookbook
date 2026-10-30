@@ -1,0 +1,426 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>AMPLS DNS Whiteboard</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Kalam:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a whiteboard wall — two large boards (target architecture, migration flow) + a strip of sticky notes. */
+:root{
+  --board:#fbfcfd; --wall:#e9edf1; --ink:#1f2a37; --ink-soft:#5b6878; --grid:#dfe5ec;
+  --blue:#1f6fd1; --blue-bg:#e6f0fc; --green:#1d9a5b; --green-bg:#e3f6ec;
+  --purple:#7c3aed; --purple-bg:#f0e9fe; --orange:#e2700f; --orange-bg:#fff0e1;
+  --red:#d9363e; --red-bg:#fde8e9; --teal:#0f8b8d; --yellow:#ffe680; --yellow-ink:#4a3b00;
+  --pink:#ffc6dc; --mint:#c4f0d8; --sky:#c9e2ff;
+  --hand:"Caveat","Kalam","Comic Sans MS",cursive; --body:"Kalam","Segoe Print","Comic Sans MS",cursive;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --board:#1b2128; --wall:#11161b; --ink:#e8edf2; --ink-soft:#a2afbd; --grid:#27303a;
+  --blue:#5ea3ff; --blue-bg:#16263c; --green:#3fd08a; --green-bg:#122b20;
+  --purple:#b18cff; --purple-bg:#241a3a; --orange:#ffa04d; --orange-bg:#33220f;
+  --red:#ff6b72; --red-bg:#3a1719; --teal:#3cc7c9; --yellow:#e8c94a; --yellow-ink:#2b2200;
+  --pink:#e59bb9; --mint:#8fd6b0; --sky:#8fbcf0; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --board:#1b2128; --wall:#11161b; --ink:#e8edf2; --ink-soft:#a2afbd; --grid:#27303a;
+  --blue:#5ea3ff; --blue-bg:#16263c; --green:#3fd08a; --green-bg:#122b20;
+  --purple:#b18cff; --purple-bg:#241a3a; --orange:#ffa04d; --orange-bg:#33220f;
+  --red:#ff6b72; --red-bg:#3a1719; --teal:#3cc7c9; --yellow:#e8c94a; --yellow-ink:#2b2200;
+  --pink:#e59bb9; --mint:#8fd6b0; --sky:#8fbcf0; color-scheme:dark}
+body{background:var(--wall);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5}
+.wrap{max-width:1480px;margin:0 auto;padding-block:28px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:28px}
+header h1{font-family:var(--hand);font-weight:700;font-size:clamp(34px,5vw,56px);line-height:1;margin:0;text-wrap:balance}
+header h1 span{color:var(--blue)} header h1 em{font-style:normal;color:var(--purple)}
+header p{margin:8px 0 0;color:var(--ink-soft);max-width:70ch}
+.legend{display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:12px;font-size:14px}
+.legend i{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:6px;vertical-align:-2px;border:2px solid}
+.board{background:var(--board);background-image:radial-gradient(var(--grid) 1.2px,transparent 1.2px);background-size:22px 22px;border-radius:14px;
+  box-shadow:0 1px 0 rgba(0,0,0,.04),0 10px 30px -12px rgba(0,0,0,.25);border:10px solid #c9d1da;min-width:0}
+:root[data-theme="dark"] .board{border-color:#2c353f}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .board{border-color:#2c353f}}
+.board h2{font-family:var(--hand);font-size:34px;margin:0;padding:14px 22px 0;line-height:1.1}
+.board h2 small{font-family:var(--body);font-size:15px;color:var(--ink-soft);font-weight:400;margin-left:10px}
+.scroll{overflow-x:auto;padding:4px 10px 14px}
+svg{display:block;min-width:1100px;width:100%;height:auto}
+svg text{fill:var(--ink)}
+.h{font-family:var(--hand);font-weight:700}
+.b{font-family:var(--body)}
+.m{font-family:var(--mono);font-size:12.5px}
+.soft{fill:var(--ink-soft)}
+.sk{filter:url(#rough)}
+.notes{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:22px}
+.note{padding:16px 18px 18px;color:var(--yellow-ink);font-size:15px;box-shadow:0 8px 14px -8px rgba(0,0,0,.35);min-width:0}
+.note:nth-child(6n+1){background:var(--yellow);transform:rotate(-1.4deg)}
+.note:nth-child(6n+2){background:var(--pink);transform:rotate(1.1deg)}
+.note:nth-child(6n+3){background:var(--mint);transform:rotate(-.6deg)}
+.note:nth-child(6n+4){background:var(--sky);transform:rotate(1.6deg)}
+.note:nth-child(6n+5){background:var(--yellow);transform:rotate(.7deg)}
+.note:nth-child(6n+6){background:var(--pink);transform:rotate(-1.2deg)}
+.note b{display:block;font-family:var(--hand);font-size:24px;line-height:1.05;margin-bottom:6px}
+.note code{font-family:var(--mono);font-size:12px;background:rgba(255,255,255,.45);padding:0 3px;border-radius:3px;word-break:break-word}
+@media (prefers-reduced-motion:no-preference){.flow{stroke-dasharray:8 7;animation:dash 1.4s linear infinite}@keyframes dash{to{stroke-dashoffset:-30}}}
+</style>
+
+<div class="wrap">
+<header>
+  <h1><span>AMPLS</span> + DNS Private Resolver — <em>central privatelink DNS</em></h1>
+  <p>Hub-and-spoke target state, who owns what in each subscription, how a lookup flows, and how the privatelink zones move off the enterprise DNS servers wave by wave.</p>
+  <div class="legend">
+    <span><i style="border-color:var(--orange);background:var(--orange-bg)"></i>On-premises / DNS servers</span>
+    <span><i style="border-color:var(--blue);background:var(--blue-bg)"></i>Network (connectivity) sub</span>
+    <span><i style="border-color:var(--purple);background:var(--purple-bg)"></i>Shared prod (management) sub</span>
+    <span><i style="border-color:var(--green);background:var(--green-bg)"></i>Workload subs</span>
+    <span><i style="border-color:var(--red);background:var(--red-bg)"></i>Lookup path ①–⑤</span>
+  </div>
+</header>
+
+<!-- ================= BOARD 1: TARGET ARCHITECTURE ================= -->
+<section class="board" aria-label="Target architecture">
+<h2>① Target architecture <small>one resolver · one set of zones · one AMPLS</small></h2>
+<div class="scroll">
+<svg viewBox="0 0 1400 990" role="img" aria-label="Architecture: on-prem DNS forwards public Azure zones to the resolver inbound endpoint in the hub; central privatelink zones are linked to the hub; AMPLS private endpoint sits in the hub; spokes use the resolver as DNS.">
+<defs>
+  <filter id="rough" x="-2%" y="-2%" width="104%" height="104%"><feTurbulence type="fractalNoise" baseFrequency="0.02" numOctaves="2" seed="7"/><feDisplacementMap in="SourceGraphic" scale="3"/></filter>
+  <marker id="aR" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--red)"/></marker>
+  <marker id="aG" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--green)"/></marker>
+  <marker id="aP" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--purple)"/></marker>
+  <marker id="aB" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--blue)"/></marker>
+</defs>
+
+<!-- ON-PREM -->
+<rect class="sk" x="24" y="70" width="320" height="640" rx="18" style="fill:var(--orange-bg);stroke:var(--orange);stroke-width:3"/>
+<text class="h" x="44" y="108" font-size="30" style="fill:var(--orange)">On-premises</text>
+<rect class="sk" x="46" y="128" width="276" height="62" rx="10" style="fill:var(--board);stroke:var(--orange);stroke-width:2"/>
+<text class="b" x="62" y="154" font-size="16">💻 Clients / app servers</text>
+<text class="m soft" x="62" y="176">resolv → 10.10.0.10/.11</text>
+
+<rect class="sk" x="46" y="214" width="276" height="300" rx="10" style="fill:var(--board);stroke:var(--orange);stroke-width:2.5"/>
+<text class="h" x="62" y="244" font-size="24">Enterprise DNS (DCs / Infoblox)</text>
+<text class="b soft" x="62" y="268" font-size="14">Conditional forwarders → 10.0.0.4 (+ DR)</text>
+<g class="m">
+  <text x="66" y="294">blob.core.windows.net</text>
+  <text x="66" y="314">file|queue|table|dfs.core…</text>
+  <text x="66" y="334">(vault|vaultcore).azure.net</text>
+  <text x="66" y="354">database.windows.net</text>
+  <text x="66" y="374">monitor.azure.com</text>
+  <text x="66" y="394">oms|ods.opinsights.azure.com</text>
+  <text x="66" y="414">agentsvc.azure-automation.net</text>
+  <text x="66" y="434">applicationinsights.azure.com</text>
+</g>
+<text class="b" x="62" y="466" font-size="14" style="fill:var(--red)">privatelink.* zones — removed</text>
+<line x1="62" y1="461" x2="248" y2="461" style="stroke:var(--red);stroke-width:2.5"/>
+<text class="b soft" x="62" y="492" font-size="13">forward the PUBLIC zone, never privatelink.*</text>
+
+<rect class="sk" x="46" y="540" width="276" height="76" rx="10" style="fill:var(--board);stroke:var(--orange);stroke-width:2"/>
+<text class="b" x="62" y="566" font-size="16">🖥️ Servers with AMA / Arc</text>
+<text class="m soft" x="62" y="588">logs → DCE / ods endpoints</text>
+<text class="m soft" x="62" y="606">over ER to the AMPLS PE</text>
+<text class="h" x="56" y="660" font-size="20" style="fill:var(--orange)">owner: DNS / network ops</text>
+<text class="b soft" x="56" y="684" font-size="13">no Azure records live here any more</text>
+
+<!-- ER link -->
+<path class="sk" d="M344 330 C 370 330, 380 300, 404 300" style="fill:none;stroke:var(--ink);stroke-width:7;stroke-linecap:round;opacity:.75"/>
+<text class="h" x="380" y="520" font-size="20" transform="rotate(-90 380 520)">ExpressRoute / VPN</text>
+
+<!-- CONNECTIVITY SUB -->
+<rect class="sk" x="404" y="70" width="560" height="580" rx="18" style="fill:var(--blue-bg);stroke:var(--blue);stroke-width:3"/>
+<text class="h" x="424" y="108" font-size="30" style="fill:var(--blue)">Network / connectivity subscription</text>
+<rect class="sk" x="422" y="124" width="524" height="322" rx="12" style="fill:none;stroke:var(--blue);stroke-width:2;stroke-dasharray:7 6"/>
+<text class="b" x="438" y="148" font-size="15" style="fill:var(--blue)">vnet-hub · DNS = Azure-provided</text>
+
+<rect class="sk" x="438" y="162" width="240" height="104" rx="10" style="fill:var(--board);stroke:var(--blue);stroke-width:2.5"/>
+<text class="h" x="452" y="190" font-size="22">DNS Private Resolver</text>
+<text class="b" x="452" y="214" font-size="15">Inbound endpoint</text>
+<text class="m" x="452" y="236" style="fill:var(--red);font-weight:600">10.0.0.4 (static) /28</text>
+<text class="m soft" x="452" y="256">← on-prem + every spoke</text>
+
+<rect class="sk" x="694" y="162" width="236" height="104" rx="10" style="fill:var(--board);stroke:var(--blue);stroke-width:2"/>
+<text class="h" x="708" y="190" font-size="22">Outbound + ruleset</text>
+<text class="m" x="708" y="214">corp.contoso.com. →</text>
+<text class="m" x="708" y="234">  10.10.0.10/.11</text>
+<text class="b soft" x="708" y="256" font-size="13">on-prem names only (no loops)</text>
+
+<rect class="sk" x="438" y="282" width="492" height="72" rx="10" style="fill:var(--board);stroke:var(--purple);stroke-width:2.5"/>
+<text class="b" x="452" y="306" font-size="15">snet-privateendpoints</text>
+<rect x="452" y="316" width="300" height="28" rx="14" style="fill:var(--purple-bg);stroke:var(--purple);stroke-width:2"/>
+<text class="m" x="466" y="335" style="fill:var(--purple);font-weight:600">pe-ampls-shared · azuremonitor</text>
+<text class="m soft" x="766" y="335">10.0.1.0/24</text>
+
+<rect class="sk" x="438" y="370" width="240" height="60" rx="10" style="fill:var(--board);stroke:var(--blue);stroke-width:2;stroke-dasharray:5 5"/>
+<text class="b" x="452" y="394" font-size="15">Azure Firewall DNS proxy</text>
+<text class="b soft" x="452" y="416" font-size="13">optional · spokes → FW → resolver</text>
+<rect class="sk" x="694" y="370" width="236" height="60" rx="10" style="fill:var(--board);stroke:var(--teal);stroke-width:2"/>
+<text class="b" x="708" y="394" font-size="15" style="fill:var(--teal)">Azure DNS 168.63.129.16</text>
+<text class="b soft" x="708" y="416" font-size="13">answers from linked zones</text>
+
+<!-- zones -->
+<rect class="sk" x="422" y="462" width="524" height="170" rx="12" style="fill:var(--board);stroke:var(--blue);stroke-width:2.5"/>
+<text class="h" x="438" y="490" font-size="22">rg-dns-privatezones 🔒 CanNotDelete</text>
+<g class="m" style="font-size:11.5px">
+ <rect x="438" y="502" width="244" height="24" rx="12" style="fill:var(--blue-bg);stroke:var(--blue)"/><text x="450" y="519">privatelink.blob.core.windows.net</text>
+ <rect x="692" y="502" width="238" height="24" rx="12" style="fill:var(--purple-bg);stroke:var(--purple)"/><text x="704" y="519">privatelink.monitor.azure.com</text>
+ <rect x="438" y="532" width="244" height="24" rx="12" style="fill:var(--blue-bg);stroke:var(--blue)"/><text x="450" y="549">privatelink.vaultcore.azure.net</text>
+ <rect x="692" y="532" width="238" height="24" rx="12" style="fill:var(--purple-bg);stroke:var(--purple)"/><text x="704" y="549">privatelink.oms.opinsights…</text>
+ <rect x="438" y="562" width="244" height="24" rx="12" style="fill:var(--blue-bg);stroke:var(--blue)"/><text x="450" y="579">privatelink.database.windows.net</text>
+ <rect x="692" y="562" width="238" height="24" rx="12" style="fill:var(--purple-bg);stroke:var(--purple)"/><text x="704" y="579">privatelink.ods.opinsights…</text>
+ <rect x="438" y="592" width="244" height="24" rx="12" style="fill:var(--blue-bg);stroke:var(--blue)"/><text x="450" y="609">+ azurecr, web, file, queue…</text>
+ <rect x="692" y="592" width="238" height="24" rx="12" style="fill:var(--purple-bg);stroke:var(--purple)"/><text x="704" y="609">privatelink.agentsvc.azure-…</text>
+</g>
+<!-- link zones -> hub -->
+<path d="M970 548 C 990 548, 990 140, 960 140" style="fill:none;stroke:var(--blue);stroke-width:2.5;stroke-dasharray:3 6" marker-end="url(#aB)"/>
+<text class="h" x="984" y="230" font-size="17" style="fill:var(--blue)" transform="rotate(90 984 230)">VNet link → hub only</text>
+
+<!-- MANAGEMENT SUB -->
+<rect class="sk" x="404" y="678" width="560" height="226" rx="18" style="fill:var(--purple-bg);stroke:var(--purple);stroke-width:3"/>
+<text class="h" x="424" y="714" font-size="30" style="fill:var(--purple)">Shared production / management sub</text>
+<rect class="sk" x="424" y="730" width="250" height="110" rx="10" style="fill:var(--board);stroke:var(--purple);stroke-width:2.5"/>
+<text class="h" x="438" y="758" font-size="22">ampls-shared</text>
+<text class="m" x="438" y="782">ingestion: Open → PrivateOnly</text>
+<text class="m" x="438" y="802">query:     Open</text>
+<text class="b soft" x="438" y="826" font-size="13">ONE per DNS namespace</text>
+<rect class="sk" x="690" y="730" width="254" height="50" rx="10" style="fill:var(--board);stroke:var(--purple);stroke-width:2"/>
+<text class="b" x="704" y="761" font-size="15">📊 law-shared-prod (+ scoped LAWs)</text>
+<rect class="sk" x="690" y="790" width="122" height="50" rx="10" style="fill:var(--board);stroke:var(--purple);stroke-width:2"/>
+<text class="b" x="702" y="821" font-size="15">DCE (AMA)</text>
+<rect class="sk" x="822" y="790" width="122" height="50" rx="10" style="fill:var(--board);stroke:var(--purple);stroke-width:2"/>
+<text class="b" x="834" y="821" font-size="15">App Insights</text>
+<text class="b soft" x="438" y="874" font-size="14">AMPLS PE resource lives here · its NIC sits in the hub PE subnet</text>
+<text class="b soft" x="438" y="894" font-size="14">scoped: workspaces · components · DCEs from any subscription</text>
+<path d="M660 730 C 660 600, 700 420, 716 348" style="fill:none;stroke:var(--purple);stroke-width:3" marker-end="url(#aP)"/>
+<text class="h" x="672" y="664" font-size="17" style="fill:var(--purple)">private link</text>
+
+<!-- WORKLOAD SUBS -->
+<rect class="sk" x="1000" y="70" width="380" height="834" rx="18" style="fill:var(--green-bg);stroke:var(--green);stroke-width:3"/>
+<text class="h" x="1020" y="108" font-size="30" style="fill:var(--green)">Workload subscriptions</text>
+<rect class="sk" x="1018" y="124" width="344" height="252" rx="12" style="fill:var(--board);stroke:var(--green);stroke-width:2.5"/>
+<text class="h" x="1034" y="152" font-size="22">vnet-app1 (spoke)</text>
+<text class="m" x="1034" y="174" style="fill:var(--red);font-weight:600">dns_servers = [10.0.0.4]</text>
+<g class="m">
+ <rect x="1034" y="190" width="150" height="28" rx="14" style="fill:var(--green-bg);stroke:var(--green)"/><text x="1048" y="209">pe-kv · vault</text>
+ <rect x="1194" y="190" width="150" height="28" rx="14" style="fill:var(--green-bg);stroke:var(--green)"/><text x="1208" y="209">pe-sql · sql</text>
+ <rect x="1034" y="226" width="150" height="28" rx="14" style="fill:var(--green-bg);stroke:var(--green)"/><text x="1048" y="245">pe-st · blob/file</text>
+ <rect x="1194" y="226" width="150" height="28" rx="14" style="fill:var(--green-bg);stroke:var(--green)"/><text x="1208" y="245">pe-sb · namespace</text>
+</g>
+<text class="b" x="1034" y="282" font-size="15">🖥️ VMs + AMA → DCR → DCE</text>
+<text class="b soft" x="1034" y="306" font-size="13">no private DNS zones in this subscription</text>
+<text class="b soft" x="1034" y="326" font-size="13">zone group added by DINE policy</text>
+<text class="b soft" x="1034" y="346" font-size="13">(TF: ignore_changes on zone group)</text>
+
+<rect class="sk" x="1018" y="394" width="344" height="210" rx="12" style="fill:var(--board);stroke:var(--green);stroke-width:2.5"/>
+<text class="h" x="1034" y="422" font-size="22">ARO / OpenShift spoke</text>
+<text class="m" x="1034" y="444" style="fill:var(--red);font-weight:600">VNet DNS = 10.0.0.4</text>
+<text class="b" x="1034" y="472" font-size="14">pod → CoreDNS → node resolv.conf</text>
+<text class="b" x="1034" y="494" font-size="14">→ VNet DNS → resolver</text>
+<g class="m">
+ <rect x="1034" y="510" width="150" height="28" rx="14" style="fill:var(--green-bg);stroke:var(--green)"/><text x="1048" y="529">pe-acr · registry</text>
+ <rect x="1194" y="510" width="150" height="28" rx="14" style="fill:var(--green-bg);stroke:var(--green)"/><text x="1208" y="529">container insights</text>
+</g>
+<text class="b soft" x="1034" y="566" font-size="13">leave ARO/AKS-managed zones alone</text>
+<text class="b soft" x="1034" y="586" font-size="13">test from a node: oc debug node/…</text>
+
+<rect class="sk" x="1018" y="622" width="344" height="150" rx="12" style="fill:var(--board);stroke:var(--green);stroke-width:2.5"/>
+<text class="h" x="1034" y="650" font-size="22">App LAW / App Insights</text>
+<text class="b" x="1034" y="676" font-size="14">✔ add to central ampls-shared</text>
+<text class="b" x="1034" y="698" font-size="14" style="fill:var(--red)">✘ never a 2nd AMPLS + PE here</text>
+<text class="b soft" x="1034" y="722" font-size="13">a second AMPLS on the same DNS</text>
+<text class="b soft" x="1034" y="742" font-size="13">overwrites the shared records</text>
+<text class="b soft" x="1034" y="762" font-size="13">(api.monitor.azure.com etc.)</text>
+<text class="h" x="1034" y="808" font-size="20" style="fill:var(--green)">peered to hub · UDR via firewall</text>
+<text class="b soft" x="1034" y="834" font-size="13">owner: app team — creates PEs only</text>
+
+<!-- peering -->
+<line x1="964" y1="250" x2="1018" y2="250" style="stroke:var(--green);stroke-width:5;stroke-linecap:round;opacity:.7"/>
+<line x1="964" y1="480" x2="1018" y2="480" style="stroke:var(--green);stroke-width:5;stroke-linecap:round;opacity:.7"/>
+<!-- spoke DNS -> inbound -->
+<path class="flow" d="M1018 170 C 860 150, 760 120, 680 196" style="fill:none;stroke:var(--green);stroke-width:2.5" marker-end="url(#aG)"/>
+<!-- zone group -->
+<path d="M1034 240 C 980 320, 990 460, 932 540" style="fill:none;stroke:var(--green);stroke-width:2.5;stroke-dasharray:10 6" marker-end="url(#aG)"/>
+
+<!-- LOOKUP PATH (red) -->
+<path class="flow" d="M184 190 L184 214" style="stroke:var(--red);stroke-width:3" marker-end="url(#aR)"/>
+<path class="flow" d="M322 300 C 380 270, 400 230, 438 214" style="fill:none;stroke:var(--red);stroke-width:3" marker-end="url(#aR)"/>
+<path class="flow" d="M600 266 C 650 330, 690 380, 700 386" style="fill:none;stroke:var(--red);stroke-width:3" marker-end="url(#aR)"/>
+<path class="flow" d="M812 430 C 812 450, 812 456, 812 462" style="stroke:var(--red);stroke-width:3" marker-end="url(#aR)"/>
+<path class="flow" d="M184 616 C 230 690, 390 660, 452 344" style="fill:none;stroke:var(--red);stroke-width:3;opacity:.8" marker-end="url(#aR)"/>
+<g class="h" font-size="22">
+ <circle cx="206" cy="202" r="13" style="fill:var(--red)"/><text x="200" y="209" style="fill:#fff">1</text>
+ <circle cx="390" cy="200" r="13" style="fill:var(--red)"/><text x="384" y="207" style="fill:#fff">2</text>
+ <circle cx="690" cy="298" r="13" style="fill:var(--red)"/><text x="684" y="305" style="fill:#fff">3</text>
+ <circle cx="834" cy="450" r="13" style="fill:var(--red)"/><text x="828" y="457" style="fill:#fff">4</text>
+ <circle cx="374" cy="600" r="13" style="fill:var(--red)"/><text x="368" y="607" style="fill:#fff">5</text>
+</g>
+
+<!-- lookup legend -->
+<rect class="sk" x="24" y="726" width="360" height="178" rx="14" style="fill:var(--red-bg);stroke:var(--red);stroke-width:2.5"/>
+<text class="h" x="42" y="756" font-size="22" style="fill:var(--red)">How st1.blob… resolves</text>
+<g class="b" font-size="14">
+ <text x="42" y="782">① client asks enterprise DNS</text>
+ <text x="42" y="804">② forwarder blob.core.windows.net → 10.0.0.4</text>
+ <text x="42" y="826">③ resolver asks Azure DNS; CNAME → privatelink</text>
+ <text x="42" y="848">④ hub-linked zone answers 10.0.1.x</text>
+ <text x="42" y="870">⑤ traffic rides ER to the PE</text>
+</g>
+<text class="b soft" x="42" y="892" font-size="13">spokes start at ② directly (VNet DNS = inbound IP)</text>
+
+<!-- governance strip -->
+<rect class="sk" x="24" y="926" width="1356" height="52" rx="12" style="fill:var(--board);stroke:var(--ink-soft);stroke-width:2;stroke-dasharray:6 5"/>
+<text class="h" x="42" y="960" font-size="22">Governance (MG scope):</text>
+<g class="b" font-size="15">
+ <text x="300" y="959">🛡️ DINE: PE → central zone group (per groupId)</text>
+ <text x="690" y="959">⛔ Deny privatelink.* zones in landing zones</text>
+ <text x="1030" y="959">🔑 MI: Network + DNS Zone Contributor</text>
+</g>
+</svg>
+</div>
+</section>
+
+<!-- ================= BOARD 2: MIGRATION ================= -->
+<section class="board" aria-label="Migration flow">
+<h2>② Migration flow <small>zones leave the DNS servers one wave at a time</small></h2>
+<div class="scroll">
+<svg viewBox="0 0 1400 700" role="img" aria-label="Migration: before state with zones on DNS servers, per-wave loop of export, reconcile, zone groups, parity, cutover and validate with rollback, after state, and a wave timeline.">
+<defs>
+  <marker id="mR" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--red)"/></marker>
+  <marker id="mI" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink)"/></marker>
+  <marker id="mG" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--green)"/></marker>
+</defs>
+
+<!-- BEFORE -->
+<rect class="sk" x="24" y="30" width="360" height="370" rx="18" style="fill:var(--orange-bg);stroke:var(--orange);stroke-width:3"/>
+<text class="h" x="44" y="68" font-size="32" style="fill:var(--orange)">BEFORE</text>
+<rect class="sk" x="44" y="86" width="320" height="168" rx="10" style="fill:var(--board);stroke:var(--orange);stroke-width:2"/>
+<text class="b" x="58" y="110" font-size="15">Enterprise DNS hosts the zones:</text>
+<g class="m">
+ <text x="62" y="134">privatelink.blob.core.windows.net</text>
+ <text x="62" y="152">  st1   A 10.1.0.6   (manual)</text>
+ <text x="62" y="174">privatelink.vaultcore.azure.net</text>
+ <text x="62" y="192">  kv02  A 10.1.0.9   ← stale</text>
+ <text x="62" y="214">privatelink.database.windows.net</text>
+ <text x="62" y="232">  …     A …          (ticket-driven)</text>
+</g>
+<g class="b" font-size="14">
+ <text x="48" y="282" style="fill:var(--red)">✘ every new PE = a DNS ticket</text>
+ <text x="48" y="304" style="fill:var(--red)">✘ IP changes go stale silently</text>
+ <text x="48" y="326" style="fill:var(--red)">✘ Azure VNets see different answers</text>
+ <text x="48" y="348" style="fill:var(--red)">✘ AMPLS needs 5 zones kept in sync</text>
+ <text x="48" y="370" style="fill:var(--red)">✘ shadow zones in workload subs</text>
+</g>
+
+<!-- AFTER -->
+<rect class="sk" x="1016" y="30" width="360" height="370" rx="18" style="fill:var(--green-bg);stroke:var(--green);stroke-width:3"/>
+<text class="h" x="1036" y="68" font-size="32" style="fill:var(--green)">AFTER</text>
+<rect class="sk" x="1036" y="86" width="320" height="120" rx="10" style="fill:var(--board);stroke:var(--green);stroke-width:2"/>
+<text class="b" x="1050" y="110" font-size="15">Enterprise DNS holds only forwarders:</text>
+<g class="m">
+ <text x="1054" y="134">blob.core.windows.net   → 10.0.0.4</text>
+ <text x="1054" y="154">vault.azure.net         → 10.0.0.4</text>
+ <text x="1054" y="174">monitor.azure.com       → 10.0.0.4</text>
+ <text x="1054" y="194">…                       → 10.0.0.4</text>
+</g>
+<g class="b" font-size="14">
+ <text x="1040" y="236" style="fill:var(--green)">✔ PE zone groups write the records</text>
+ <text x="1040" y="258" style="fill:var(--green)">✔ IP changes self-heal</text>
+ <text x="1040" y="280" style="fill:var(--green)">✔ same answer on-prem and in Azure</text>
+ <text x="1040" y="302" style="fill:var(--green)">✔ DINE policy, no tickets</text>
+ <text x="1040" y="324" style="fill:var(--green)">✔ one AMPLS, PrivateOnly at the end</text>
+ <text x="1040" y="346" style="fill:var(--green)">✔ shadow zones denied</text>
+</g>
+<text class="b soft" x="1040" y="380" font-size="13">zone backups + cutover logs kept for rollback</text>
+
+<!-- LOOP -->
+<text class="h" x="560" y="56" font-size="28" text-anchor="middle">repeat per wave</text>
+<circle cx="700" cy="232" r="140" class="sk" style="fill:none;stroke:var(--ink-soft);stroke-width:2.5;stroke-dasharray:4 8"/>
+<g>
+ <rect class="sk" x="610" y="64" width="180" height="58" rx="12" style="fill:var(--sky);stroke:var(--blue);stroke-width:2.5"/>
+ <text class="h" x="700" y="90" font-size="21" text-anchor="middle" style="fill:#13253b">Export + backup</text>
+ <text class="m" x="700" y="111" text-anchor="middle" style="fill:#13253b">01 · axfr.sh</text>
+
+ <rect class="sk" x="800" y="132" width="180" height="58" rx="12" style="fill:var(--sky);stroke:var(--blue);stroke-width:2.5"/>
+ <text class="h" x="890" y="158" font-size="19" text-anchor="middle" style="fill:#13253b">Inventory + reconcile</text>
+ <text class="m" x="890" y="179" text-anchor="middle" style="fill:#13253b">02 · 03</text>
+
+ <rect class="sk" x="800" y="278" width="180" height="58" rx="12" style="fill:var(--mint);stroke:var(--green);stroke-width:2.5"/>
+ <text class="h" x="890" y="304" font-size="19" text-anchor="middle" style="fill:#0f2a1c">Backfill zone groups</text>
+ <text class="m" x="890" y="325" text-anchor="middle" style="fill:#0f2a1c">04 · 05 (orphans)</text>
+
+ <rect class="sk" x="610" y="344" width="180" height="58" rx="12" style="fill:var(--yellow);stroke:var(--orange);stroke-width:2.5"/>
+ <text class="h" x="700" y="370" font-size="21" text-anchor="middle" style="fill:#3a2a00">Parity gate</text>
+ <text class="m" x="700" y="391" text-anchor="middle" style="fill:#3a2a00">06 · exit 0 or stop</text>
+
+ <rect class="sk" x="420" y="278" width="180" height="58" rx="12" style="fill:var(--pink);stroke:var(--red);stroke-width:2.5"/>
+ <text class="h" x="510" y="304" font-size="21" text-anchor="middle" style="fill:#3b0f1e">Cutover</text>
+ <text class="m" x="510" y="325" text-anchor="middle" style="fill:#3b0f1e">07 · fwd → drop zone</text>
+
+ <rect class="sk" x="420" y="132" width="180" height="58" rx="12" style="fill:var(--mint);stroke:var(--green);stroke-width:2.5"/>
+ <text class="h" x="510" y="158" font-size="21" text-anchor="middle" style="fill:#0f2a1c">Validate clients</text>
+ <text class="m" x="510" y="179" text-anchor="middle" style="fill:#0f2a1c">09 · 10 · .sh</text>
+</g>
+<g style="fill:none;stroke:var(--ink);stroke-width:2.5">
+ <path d="M790 100 C 840 104, 870 112, 880 130" marker-end="url(#mI)"/>
+ <path d="M890 190 L890 276" marker-end="url(#mI)"/>
+ <path d="M880 336 C 860 366, 820 372, 792 372" marker-end="url(#mI)"/>
+ <path d="M610 372 C 560 372, 530 356, 520 338" marker-end="url(#mI)"/>
+ <path d="M510 278 L510 192" marker-end="url(#mI)"/>
+ <path d="M520 132 C 540 104, 570 96, 608 94" marker-end="url(#mI)"/>
+</g>
+<path d="M420 318 C 396 300, 396 200, 418 168" style="fill:none;stroke:var(--red);stroke-width:2.5;stroke-dasharray:6 5" marker-end="url(#mR)"/>
+<text class="h" x="426" y="360" font-size="18" style="fill:var(--red)">↺ 08 undo</text>
+<text class="h" x="700" y="226" font-size="22" text-anchor="middle">one wave</text>
+<text class="b soft" x="700" y="250" font-size="13" text-anchor="middle">change window · TTLs lowered</text>
+<path d="M384 216 L 404 216" style="stroke:var(--orange);stroke-width:4" marker-end="url(#mI)"/>
+<path d="M992 216 L 1012 216" style="stroke:var(--green);stroke-width:4" marker-end="url(#mG)"/>
+
+<!-- TIMELINE -->
+<line x1="70" y1="520" x2="1330" y2="520" style="stroke:var(--ink);stroke-width:4;stroke-linecap:round"/>
+<g>
+ <circle cx="110" cy="520" r="16" style="fill:var(--blue)"/><text class="h" x="110" y="527" font-size="20" text-anchor="middle" style="fill:#fff">0</text>
+ <text class="h" x="110" y="490" font-size="21" text-anchor="middle">Build</text>
+ <text class="b" x="110" y="560" font-size="13" text-anchor="middle">resolver · zones · links</text>
+ <text class="b" x="110" y="578" font-size="13" text-anchor="middle">AMPLS Open/Open</text>
+ <text class="b" x="110" y="596" font-size="13" text-anchor="middle">policies in Audit/DINE</text>
+ <text class="b" x="110" y="614" font-size="13" text-anchor="middle">spokes DNS → 10.0.0.4</text>
+
+ <circle cx="340" cy="520" r="16" style="fill:var(--green)"/><text class="h" x="340" y="527" font-size="20" text-anchor="middle" style="fill:#fff">1</text>
+ <text class="h" x="340" y="490" font-size="21" text-anchor="middle">Key Vault</text>
+ <text class="b" x="340" y="560" font-size="13" text-anchor="middle">lowest blast radius</text>
+ <text class="b" x="340" y="578" font-size="13" text-anchor="middle">proves the runbook</text>
+
+ <circle cx="570" cy="520" r="16" style="fill:var(--green)"/><text class="h" x="570" y="527" font-size="20" text-anchor="middle" style="fill:#fff">2</text>
+ <text class="h" x="570" y="490" font-size="21" text-anchor="middle">Data + messaging</text>
+ <text class="b" x="570" y="560" font-size="13" text-anchor="middle">SQL · Postgres · Cosmos</text>
+ <text class="b" x="570" y="578" font-size="13" text-anchor="middle">Service Bus / Event Hubs</text>
+
+ <circle cx="800" cy="520" r="16" style="fill:var(--green)"/><text class="h" x="800" y="527" font-size="20" text-anchor="middle" style="fill:#fff">3</text>
+ <text class="h" x="800" y="490" font-size="21" text-anchor="middle">Apps + storage-ish</text>
+ <text class="b" x="800" y="560" font-size="13" text-anchor="middle">ACR · App Service</text>
+ <text class="b" x="800" y="578" font-size="13" text-anchor="middle">file · queue · table · dfs</text>
+
+ <circle cx="1030" cy="520" r="16" style="fill:var(--purple)"/><text class="h" x="1030" y="527" font-size="20" text-anchor="middle" style="fill:#fff">4</text>
+ <text class="h" x="1030" y="490" font-size="21" text-anchor="middle">Blob + AMPLS</text>
+ <text class="b" x="1030" y="560" font-size="13" text-anchor="middle">same window — shared</text>
+ <text class="b" x="1030" y="578" font-size="13" text-anchor="middle">privatelink.blob zone</text>
+ <text class="b" x="1030" y="596" font-size="13" text-anchor="middle">+ 4 monitor zones</text>
+
+ <circle cx="1270" cy="520" r="16" style="fill:var(--red)"/><text class="h" x="1270" y="527" font-size="20" text-anchor="middle" style="fill:#fff">5</text>
+ <text class="h" x="1270" y="490" font-size="21" text-anchor="middle">Lock down</text>
+ <text class="b" x="1270" y="560" font-size="13" text-anchor="middle">Deny policy → Deny</text>
+ <text class="b" x="1270" y="578" font-size="13" text-anchor="middle">AMPLS → PrivateOnly</text>
+ <text class="b" x="1270" y="596" font-size="13" text-anchor="middle">LAW public ingest off</text>
+ <text class="b" x="1270" y="614" font-size="13" text-anchor="middle">delete shadow zones</text>
+</g>
+<text class="h" x="700" y="672" font-size="20" text-anchor="middle" style="fill:var(--ink-soft)">each wave: parity gate green → cutover in window → 24–48 h soak → next wave</text>
+</svg>
+</div>
+</section>
+
+<!-- ================= STICKY NOTES ================= -->
+<section class="notes" aria-label="Gotchas">
+  <div class="note"><b>One AMPLS per DNS</b>AMPLS endpoints like <code>api.monitor.azure.com</code> are global. A second AMPLS + PE on networks sharing this resolver overwrites the first one's records.</div>
+  <div class="note"><b>Blob moves with AMPLS</b>The AMPLS PE writes into <code>privatelink.blob.core.windows.net</code>. Leave that zone on-prem and agents lose solution-pack downloads.</div>
+  <div class="note"><b>Forward public, not privatelink</b>Forwarder = <code>blob.core.windows.net</code>, then delete the local <code>privatelink.*</code> zone. A leftover local zone is more specific and wins.</div>
+  <div class="note"><b>No Azure zones outbound</b>The resolver ruleset forwards only on-prem names. Add <code>blob.core.windows.net</code> there and you build a loop with on-prem.</div>
+  <div class="note"><b>Open first, PrivateOnly last</b>PrivateOnly blocks every network on this DNS from any workspace not in the AMPLS, in any subscription or tenant.</div>
+  <div class="note"><b>NewPrivatePath rows</b>PEs with no on-prem record today resolve public. After cutover they go private, so check ER routes and NSGs first.</div>
+</section>
+</div>
+
+</body></html>
