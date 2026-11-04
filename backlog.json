@@ -1,0 +1,250 @@
+{
+  "$comment": "Backlog for the AMPLS + DNS Private Resolver migration. Types are logical (epic/feature/story/task) and mapped to your process by New-AdoBacklog.ps1. 'template' features are expanded once per entry in 'waves'; 'forEachSubscription' stories once per entry in 'workloadSubscriptions'. Placeholders: {{wave.n}} {{wave.name}} {{wave.zones}} {{wave.forwarders}} {{sub.name}} {{sub.id}}.",
+  "tag": "ampls-dns-migration",
+  "workloadSubscriptions": [
+    { "name": "sub-app1-prod", "id": "00000000-0000-0000-0000-000000000101" },
+    { "name": "sub-app2-prod", "id": "00000000-0000-0000-0000-000000000102" },
+    { "name": "sub-aro-prod",  "id": "00000000-0000-0000-0000-000000000103" }
+  ],
+  "waves": [
+    { "n": 1, "name": "Key Vault", "zones": "privatelink.vaultcore.azure.net", "forwarders": "vault.azure.net, vaultcore.azure.net" },
+    { "n": 2, "name": "Databases and messaging", "zones": "privatelink.database.windows.net, privatelink.postgres.database.azure.com, privatelink.documents.azure.com, privatelink.servicebus.windows.net", "forwarders": "database.windows.net, postgres.database.azure.com, documents.azure.com, servicebus.windows.net" },
+    { "n": 3, "name": "ACR, App Service and non-blob storage", "zones": "privatelink.azurecr.io, privatelink.azurewebsites.net, privatelink.file|queue|table|dfs.core.windows.net", "forwarders": "azurecr.io, azurewebsites.net, file|queue|table|dfs.core.windows.net" },
+    { "n": 4, "name": "Blob storage and AMPLS", "zones": "privatelink.blob.core.windows.net, privatelink.monitor.azure.com, privatelink.oms.opinsights.azure.com, privatelink.ods.opinsights.azure.com, privatelink.agentsvc.azure-automation.net", "forwarders": "blob.core.windows.net, monitor.azure.com, oms.opinsights.azure.com, ods.opinsights.azure.com, agentsvc.azure-automation.net, applicationinsights.azure.com" }
+  ],
+  "epic": {
+    "title": "Centralise Private Link DNS on Azure DNS Private Resolver and AMPLS",
+    "description": [
+      "Move every privatelink.* zone off the enterprise DNS servers into central Azure Private DNS zones in the connectivity subscription.",
+      "On-prem DNS keeps only conditional forwarders to the DNS Private Resolver inbound endpoint.",
+      "Azure Monitor traffic moves to a single shared AMPLS in the management subscription.",
+      "Runbook, scripts and Terraform: repo folder ampls-dns-migration (README run order)."
+    ],
+    "ac": [
+      "No privatelink.* zones hosted on enterprise DNS servers",
+      "All private endpoints register through zone groups in the central zones (DINE policy compliant)",
+      "On-prem, spoke and ARO clients resolve PaaS FQDNs to private IPs (scripts 09/test-resolution.sh green)",
+      "AMPLS ingestion in PrivateOnly with every workspace/component scoped; no stale agent heartbeats"
+    ],
+    "priority": 1
+  },
+  "features": [
+    {
+      "title": "Foundation: DNS Private Resolver and central zones (connectivity subscription)",
+      "description": ["Build the resolver, central privatelink zones and links in the connectivity subscription. No client impact."],
+      "ac": ["Resolver inbound IP answers from on-prem and from a spoke", "All zones in zone-map.json exist in rg-dns-privatezones with a CanNotDelete lock"],
+      "stories": [
+        {
+          "title": "Deploy DNS Private Resolver in the hub (inbound, outbound, forwarding ruleset)",
+          "points": 5,
+          "description": ["Terraform: infra/terraform/connectivity.tf", "Inbound endpoint static IP; ruleset forwards on-prem domains only (no Azure public zones, avoids loops)."],
+          "ac": ["dig @<inbound-ip> management.azure.com answers from on-prem", "corp domain resolves from a hub VM through the outbound ruleset"],
+          "tasks": [
+            { "title": "Allocate and delegate two /28 subnets (inbound, outbound) in vnet-hub", "hours": 2 },
+            { "title": "Apply connectivity.tf: resolver, endpoints, ruleset, VNet links", "hours": 4 },
+            { "title": "Open UDP/TCP 53 from on-prem DNS servers to the inbound endpoint (NSG, firewall, ER route)", "hours": 4 },
+            { "title": "Deploy second resolver in DR region and record both inbound IPs", "hours": 4 }
+          ]
+        },
+        {
+          "title": "Create central privatelink zones, hub VNet links and delete lock",
+          "points": 3,
+          "description": ["Zones from config/zone-map.json in rg-dns-privatezones. Link to hub (and DR hub) only; spokes resolve via the resolver."],
+          "ac": ["terraform plan clean after apply", "CanNotDelete lock on rg-dns-privatezones"],
+          "tasks": [
+            { "title": "Review zone-map.json against estate (add Event Hubs / SQL MI if used)", "hours": 2 },
+            { "title": "Apply zones + links; verify each zone linked to hub and DR hub", "hours": 2 }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Shared AMPLS and monitoring endpoints (management subscription)",
+      "description": ["Single AMPLS for the whole DNS namespace, Open/Open access modes during migration."],
+      "ac": ["pe-ampls-shared approved with zone group on the 5 central zones", "All in-scope workspaces, App Insights and DCEs scoped"],
+      "stories": [
+        {
+          "title": "Deploy AMPLS (Open/Open), shared DCE and AMPLS private endpoint",
+          "points": 5,
+          "description": ["Terraform: infra/terraform/ampls.tf. PE resource in management sub, NIC in hub PE subnet."],
+          "ac": ["AMPLS PE connection Approved", "api.monitor.azure.com resolves to 10.0.1.x via the resolver"],
+          "tasks": [
+            { "title": "Apply ampls.tf (AMPLS, DCE, scoped services, PE + zone group)", "hours": 4 },
+            { "title": "Grant management-sub pipeline SP join/action on hub PE subnet and central zones", "hours": 2 }
+          ]
+        },
+        {
+          "title": "Scope every Log Analytics workspace, App Insights component and DCE into AMPLS",
+          "points": 3,
+          "description": ["Run scripts/10-Test-AmplsIngestion.ps1 -AddMissing -WhatIf, review, then apply. DCEs via Terraform."],
+          "ac": ["Script 10 reports no resources outside the AMPLS"],
+          "tasks": [
+            { "title": "Run script 10 report and agree in/out of scope list with app owners", "hours": 3 },
+            { "title": "Add missing resources (script 10 -AddMissing / ampls.tf for DCEs)", "hours": 2 }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Governance: DINE zone-group policy and shadow-zone control",
+      "description": ["Policies at management-group scope so new private endpoints register centrally without tickets."],
+      "ac": ["DINE assignments compliant for new PEs within 30 minutes", "Deny policy in Audit with a shadow-zone report"],
+      "stories": [
+        {
+          "title": "Assign DINE policy: private endpoints register in central zones",
+          "points": 3,
+          "description": ["infra/policy/dine-pe-dns-zonegroup.json, one assignment per groupId (policy.tf)."],
+          "ac": ["Test PE in a landing zone gets deployedByPolicy zone group", "Managed identities hold Network Contributor + Private DNS Zone Contributor"],
+          "tasks": [
+            { "title": "Apply policy.tf at landing-zones MG", "hours": 2 },
+            { "title": "Create test PE (Key Vault) and verify zone group + A record", "hours": 2 }
+          ]
+        },
+        {
+          "title": "Assign Deny privatelink.* zones in Audit and report shadow zones",
+          "points": 2,
+          "description": ["Audit during migration, Deny after the last wave."],
+          "ac": ["Shadow-zone list shared with app teams"],
+          "tasks": [{ "title": "Export non-compliant privatelink zones per subscription and notify owners", "hours": 2 }]
+        }
+      ]
+    },
+    {
+      "title": "Workload subscription readiness",
+      "description": ["Spokes resolve through the resolver; Terraform modules tolerate policy-managed zone groups."],
+      "ac": ["Every spoke VNet DNS = resolver inbound IP(s)", "test-resolution.sh green from a VM in each spoke"],
+      "stories": [
+        {
+          "forEachSubscription": true,
+          "title": "Point {{sub.name}} spoke VNets at the resolver and validate",
+          "points": 2,
+          "description": ["Subscription {{sub.id}}. Set VNet dns_servers to resolver inbound IPs (or firewall DNS proxy). VMs pick up DNS on lease renewal or restart."],
+          "ac": ["test-resolution.sh green from a VM in {{sub.name}}", "No privatelink.* zones left in {{sub.name}} after wave 4"],
+          "tasks": [
+            { "title": "{{sub.name}}: change VNet DNS servers and renew DHCP on VMs / roll AKS-ARO nodes", "hours": 3 },
+            { "title": "{{sub.name}}: run test-resolution.sh and record results", "hours": 1 }
+          ]
+        },
+        {
+          "title": "Update workload Terraform modules for policy-managed zone groups",
+          "points": 3,
+          "description": ["Add lifecycle ignore_changes on private_dns_zone_group or reference central zone IDs (infra/workload-spoke.tf.example)."],
+          "ac": ["Plans no longer try to remove deployedByPolicy zone groups"],
+          "tasks": [{ "title": "Release new module version and notify app teams", "hours": 4 }]
+        },
+        {
+          "title": "Validate ARO / OpenShift DNS path through the resolver",
+          "points": 2,
+          "description": ["Run test-resolution.sh from a node via oc debug node/<node>. Do not migrate ARO/AKS-managed zones."],
+          "ac": ["Pods resolve ACR, Key Vault and Monitor endpoints to private IPs"],
+          "tasks": [{ "title": "Run node-level DNS tests and image pull from ACR", "hours": 2 }]
+        }
+      ]
+    },
+    {
+      "title": "Discovery and reconcile",
+      "description": ["Export on-prem zones, inventory every PE, reconcile, backfill zone groups so central zones hold every record before any cutover."],
+      "ac": ["03-Compare exits 0 for all waves", "Orphan records reviewed with owners"],
+      "stories": [
+        {
+          "title": "Export and back up all on-prem privatelink zones",
+          "points": 2,
+          "description": ["scripts/01-Export-OnPremPrivatelinkZones.ps1 (Windows) or export-zone-axfr.sh (BIND/Infoblox)."],
+          "ac": ["onprem-records.csv, zone backups and forwarders list stored with the change record"],
+          "tasks": [{ "title": "Run script 01 on each DNS server set and archive outputs", "hours": 2 }]
+        },
+        {
+          "title": "Inventory private endpoints and reconcile against on-prem and central zones",
+          "points": 3,
+          "description": ["scripts/02 + 03. Review NewPrivatePath rows: these clients switch from public to private at cutover."],
+          "ac": ["reconcile.csv reviewed; NewPrivatePath routes/NSGs confirmed"],
+          "tasks": [
+            { "title": "Run scripts 02 and 03, publish reconcile summary", "hours": 2 },
+            { "title": "Check ER/UDR/NSG paths for NewPrivatePath endpoints", "hours": 4 }
+          ]
+        },
+        {
+          "title": "Backfill zone groups on existing private endpoints",
+          "points": 5,
+          "description": ["scripts/04-Set-PeDnsZoneGroup.ps1 -WhatIf, then apply; -ReplaceNonCentral for PEs pointing at shadow zones."],
+          "ac": ["No NeedsZoneGroup / CentralIpDrift rows after re-running 02+03"],
+          "tasks": [
+            { "title": "Run script 04 in WhatIf and review with app owners", "hours": 2 },
+            { "title": "Apply script 04 and re-run reconcile", "hours": 3 }
+          ]
+        },
+        {
+          "title": "Decide and import orphan records (partner / other-tenant endpoints)",
+          "points": 2,
+          "description": ["scripts/05-Import-OrphanRecords.ps1 -Include <confirmed names> only."],
+          "ac": ["Every OrphanOnPrem row marked keep (imported) or drop (owner sign-off)"],
+          "tasks": [{ "title": "Confirm orphan owners and import kept records", "hours": 3 }]
+        }
+      ]
+    },
+    {
+      "template": "wave",
+      "title": "Wave {{wave.n}} cutover: {{wave.name}}",
+      "description": ["Zones: {{wave.zones}}", "Forwarders added on enterprise DNS: {{wave.forwarders}}"],
+      "ac": ["Parity gate (script 06) green before change", "Script 07 validation green; no incidents after 48 h soak"],
+      "stories": [
+        {
+          "title": "Wave {{wave.n}}: prepare change and pass parity gate",
+          "points": 2,
+          "description": ["Raise change, lower TTLs 24 h ahead, run scripts/06-Test-ResolverParity.ps1 for {{wave.zones}}."],
+          "ac": ["Change approved", "Script 06 exit 0"],
+          "tasks": [
+            { "title": "Wave {{wave.n}}: raise change request with rollback plan (script 08)", "hours": 1 },
+            { "title": "Wave {{wave.n}}: lower record TTLs 24 h before window", "hours": 1 },
+            { "title": "Wave {{wave.n}}: run parity gate script 06 and attach parity.csv", "hours": 1 }
+          ]
+        },
+        {
+          "title": "Wave {{wave.n}}: cut over zones and validate",
+          "points": 3,
+          "description": ["scripts/07-Invoke-ZoneCutover.ps1 -WhatIf then -AutoRollback in the window; force AD replication and flush caches."],
+          "ac": ["Local zones removed, forwarders present on all DNS servers", "Scripts 09 / test-resolution.sh green from on-prem, spoke and ARO"],
+          "tasks": [
+            { "title": "Wave {{wave.n}}: run script 07 (WhatIf, then live) and replicate", "hours": 2 },
+            { "title": "Wave {{wave.n}}: run client validation (09, test-resolution.sh)", "hours": 2 },
+            { "title": "Wave {{wave.n}}: 48 h soak, then close change", "hours": 1 }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Lock down and handover",
+      "description": ["After wave 4 soak: enforce policies, AMPLS PrivateOnly, close public ingestion, hand over runbook."],
+      "ac": ["Deny policy in Deny", "AMPLS ingestion PrivateOnly", "Runbook in wiki and ownership agreed"],
+      "stories": [
+        {
+          "title": "Enforce Deny policy and remove shadow privatelink zones",
+          "points": 3,
+          "description": ["Switch deny-pl-zones to Deny; delete remaining workload privatelink zones after owner sign-off."],
+          "ac": ["Zero privatelink.* zones outside rg-dns-privatezones"],
+          "tasks": [
+            { "title": "Switch Deny policy effect to Deny", "hours": 1 },
+            { "title": "Delete shadow zones with owner sign-off", "hours": 3 }
+          ]
+        },
+        {
+          "title": "Switch AMPLS to PrivateOnly and disable public ingestion on workspaces",
+          "points": 3,
+          "description": ["Only after script 10 shows every workspace/component scoped. Disable publicNetworkAccessForIngestion per workspace."],
+          "ac": ["Script 10: no stale heartbeats 24 h after switch"],
+          "tasks": [
+            { "title": "Set ampls_ingestion_access_mode = PrivateOnly and apply", "hours": 1 },
+            { "title": "Disable public ingestion per workspace and monitor heartbeats", "hours": 3 }
+          ]
+        },
+        {
+          "title": "Publish runbook and hand over to operations",
+          "points": 2,
+          "description": ["Wiki page, scripts, rollback logs location, on-call notes."],
+          "ac": ["Operations sign-off"],
+          "tasks": [{ "title": "Run handover session with DNS and platform ops", "hours": 2 }]
+        }
+      ]
+    }
+  ]
+}
