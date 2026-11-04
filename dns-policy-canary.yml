@@ -1,0 +1,88 @@
+# Nightly canary for central private DNS + the DINE zone-group policy.
+# Audit runs every night (read-only). E2E creates and deletes throwaway PEs: weekly, or on demand.
+#
+# Agent: resolution tests (-ResolverIp / -DnsServer) need line of sight to the resolver, so use a self-hosted
+# agent pool in a spoke. On Microsoft-hosted agents leave ResolverIp empty and set TestVmId instead.
+#
+# Service connection (workload identity federation) needs:
+#   Reader + Resource Policy Contributor   landing-zones MG   (read assignments/compliance, create remediations)
+#   Reader                                 central zones RG
+#   Contributor                            test subscription  (create/delete canary RG)  - or scope to a pre-created RG
+#   Network Contributor                    test PE subnet     (subnets/join/action)
+#   Key Vault Contributor                  test subscription  (purge soft-deleted canary vault)
+
+trigger: none
+
+schedules:
+  - cron: '17 2 * * *'          # 02:17 UTC nightly
+    displayName: Nightly audit
+    branches: { include: [main] }
+    always: true
+  - cron: '47 3 * * 1'          # Mondays 03:47 UTC
+    displayName: Weekly E2E canary
+    branches: { include: [main] }
+    always: true
+
+parameters:
+  - name: mode
+    displayName: Mode (blank = by schedule)
+    type: string
+    default: auto
+    values: [auto, Audit, E2E, All]
+
+variables:
+  serviceConnection: 'sc-platform-dns-canary'
+  managementGroup: 'contoso-landingzones'
+  zoneSubscriptionId: '00000000-0000-0000-0000-000000000001'
+  hubVnetId: '/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-hub-net/providers/Microsoft.Network/virtualNetworks/vnet-hub-uks'
+  testSubscriptionId: '00000000-0000-0000-0000-000000000101'
+  testSubnetId: '/subscriptions/00000000-0000-0000-0000-000000000101/resourceGroups/rg-app1-net/providers/Microsoft.Network/virtualNetworks/vnet-app1-prod-uks/subnets/snet-pe'
+  resolverIp: '10.0.0.4'
+  dnsServer: '10.10.0.10'
+  modeParam: ${{ parameters.mode }}
+
+jobs:
+  - job: dns_policy_canary
+    displayName: Private DNS policy canary
+    pool: { name: 'platform-selfhosted-uks' }   # or vmImage: ubuntu-latest (see note above)
+    timeoutInMinutes: 75
+    steps:
+      - checkout: self
+      # Build.CronSchedule.DisplayName is only known at runtime, so pick the mode in a step
+      - pwsh: |
+          $m = if ('$(modeParam)' -ne 'auto') { '$(modeParam)' }
+               elseif ($env:BUILD_CRONSCHEDULE_DISPLAYNAME -eq 'Weekly E2E canary') { 'All' }
+               else { 'Audit' }
+          Write-Host "Mode: $m"
+          Write-Host "##vso[task.setvariable variable=runMode]$m"
+        displayName: Choose mode
+      - task: AzurePowerShell@5
+        displayName: Run 11-Test-PrivateDnsPolicy.ps1
+        inputs:
+          azureSubscription: $(serviceConnection)
+          azurePowerShellVersion: LatestVersion
+          pwsh: true
+          ScriptType: FilePath
+          ScriptPath: ampls-dns-migration/scripts/11-Test-PrivateDnsPolicy.ps1
+          ScriptArguments: >-
+            -Mode $(runMode)
+            -ManagementGroup $(managementGroup)
+            -ZoneSubscriptionId $(zoneSubscriptionId)
+            -HubVnetId $(hubVnetId)
+            -TestSubscriptionId $(testSubscriptionId)
+            -TestSubnetId $(testSubnetId)
+            -Location uksouth
+            -Services vault,blob
+            -ResolverIp $(resolverIp)
+            -DnsServer $(dnsServer)
+            -ExpectDenyEffect Audit
+            -TimeoutMinutes 45 -RemediateAfterMinutes 20
+            -JUnitPath $(Build.ArtifactStagingDirectory)/dns-policy-tests.xml
+      - task: PublishTestResults@2
+        displayName: Publish results
+        condition: always()
+        inputs:
+          testResultsFormat: JUnit
+          testResultsFiles: $(Build.ArtifactStagingDirectory)/dns-policy-tests.xml
+          testRunTitle: Private DNS policy canary ($(runMode))
+          failTaskOnFailedTests: true
