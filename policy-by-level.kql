@@ -1,0 +1,24 @@
+// Azure Resource Graph: policy assignments by level. Paste into Resource Graph Explorer with the scope set to the
+// Tenant Root Group (management-group assignments are only returned when the query scope is a management group), or:
+//   az graph query -q "$(cat policy-by-level.kql)" --management-groups <tenant-id> --first 1000
+policyresources
+| where type =~ 'microsoft.authorization/policyassignments'
+| extend scope = tostring(properties.scope),
+         definitionId = tostring(properties.policyDefinitionId)
+| extend level = case(scope matches regex @'(?i)/managementGroups/[^/]+$', 'ManagementGroup',
+                      scope matches regex @'(?i)/resourceGroups/[^/]+$', 'ResourceGroup',
+                      scope matches regex @'(?i)^/subscriptions/[^/]+$', 'Subscription', 'Other'),
+         kind = iff(definitionId contains '/policySetDefinitions/', 'Initiative', 'Policy'),
+         source = case(definitionId startswith '/providers/Microsoft.Authorization/', 'BuiltIn',
+                       definitionId contains '/managementGroups/', strcat('Custom @ mg:', extract(@'managementGroups/([^/]+)/', 1, definitionId)),
+                       'Custom @ subscription')
+| project level, scope, displayName = tostring(properties.displayName), kind, source,
+          enforcement = tostring(properties.enforcementMode), notScopes = properties.notScopes,
+          effectParam = tostring(properties.parameters.effect.value), identity = tostring(identity.type), definitionId
+| order by level asc, scope asc, displayName asc
+
+// Non-compliant resources per assignment (same scope):
+// policyresources
+// | where type =~ 'microsoft.policyinsights/policystates' and properties.complianceState =~ 'NonCompliant'
+// | summarize nonCompliant = dcount(tostring(properties.resourceId)) by assignment = tostring(properties.policyAssignmentName), scope = tostring(properties.policyAssignmentScope)
+// | order by nonCompliant desc
