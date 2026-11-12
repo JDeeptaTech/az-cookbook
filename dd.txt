@@ -1,0 +1,29 @@
+Subject: RE: Policy Impact Review: Proposed Move of Non-Production Subscription 2
+
+
+
+Thanks, these are the right questions given the business-critical integrations. Pej, please add anything I've missed.
+
+First, what the change is: we are moving the subscription to a different management group in the same tenant. Nothing inside the subscription is moved, redeployed or restarted. Resources, IP addresses, networking, data and endpoints stay exactly as they are. What changes is which policies and inherited access apply to the subscription.
+
+1. How long does it take, and is there an outage?
+The move itself completes in seconds, and there is no period where resources are unavailable. Azure can take up to about 30 minutes to reflect the new hierarchy everywhere, and the new policies start evaluating within about 30 minutes. The new policies only act when a resource is created or changed, so running workloads are not touched by the move. The real risk is to deployments made after the move, which is what the assessment below covers.
+
+2. Can it be reversed?
+Yes. Moving it back is the same one-line operation and takes seconds. Our script logs the original location and has a tested undo. One caveat: if a new 'deploy' or 'modify' policy changes something during the window (for example adding diagnostic settings or tags), moving back does not undo that change. We will list any such changes from the activity log and revert them if needed.
+
+3. Have the additional policies been assessed against existing resources, connectivity and deployment processes?
+This is being done before we ask for a change slot, and the results will be attached:
+- Existing resources: each new policy is applied to the subscription in report-only mode, a compliance scan is run, and we list every resource that would be blocked or changed. Result: [X resources would be blocked by Deny policies, Y would be changed by deploy/modify policies; list attached].
+- Access and deployment processes: we compare the access inherited today with after the move. Any pipeline service principal or team access that comes from the current management group will be recreated before the move, so deployments keep working. Result: [list].
+- Connectivity: the move does not change networking. The one connectivity-related policy registers private endpoints in the central private DNS zones. We have checked that this subscription's VNets already resolve through the central DNS resolver, so name resolution does not change. Result: [confirmed / exceptions].
+- Blockers: custom roles or policy definitions that would break the move: [none / list].
+
+To protect the integrations, we will add a time-limited exemption (two weeks) for the new Deny policies, created immediately after the move, so no deployment is blocked while the teams fix anything flagged. Compliance reporting still shows what would have been blocked.
+
+4. Test regression
+Agreed, we would like the test team involved. Proposed approach:
+- Before: the test team runs the regression packs to get a baseline, and we run a Terraform plan and a test pipeline deployment.
+- During, in an agreed window: move, exemption, and verification of DNS resolution and connectivity (about 30 minutes).
+- After: the test team reruns the regression packs and we rerun the test deployment.
+- Rollback: if the regression shows errors traced to the change, we move the subscription back the same day.
